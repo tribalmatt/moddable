@@ -22,12 +22,18 @@ HOST_OS := $(shell uname)
 UPLOAD_SPEED ?= 921600
 DEBUGGER_SPEED ?= 460800
 
-EXPECTED_ESP_IDF ?= v4.2
+EXPECTED_ESP_IDF ?= v4.3
 
 # ESP32_SUBCLASS is to find some include files in IDFv4
 # values include esp32, esp32s3 and esp32s2
 ESP32_SUBCLASS ?= esp32
 $(warning ESP32_SUBCLASS $(ESP32_SUBCLASS))
+
+ifeq ($(ESP32_SUBCLASS),"esp32s3")
+	ESP_ARCH = riscv
+else
+	ESP_ARCH = xtensa
+endif
 
 ifeq ($(VERBOSE),1)
 	CMAKE_LOG_LEVEL = VERBOSE
@@ -104,6 +110,7 @@ INC_DIRS = \
  	$(IDF_PATH)/components/$(ESP32_SUBCLASS)/include \
  	$(IDF_PATH)/components/esp_event/include \
  	$(IDF_PATH)/components/esp_eth/include \
+ 	$(IDF_PATH)/components/esp_hw_support/include \
  	$(IDF_PATH)/components/esp_netif/include \
  	$(IDF_PATH)/components/esp_ringbuf/include \
  	$(IDF_PATH)/components/esp_rom/include \
@@ -116,8 +123,10 @@ INC_DIRS = \
  	$(IDF_PATH)/components/freertos \
  	$(IDF_PATH)/components/freertos/include \
  	$(IDF_PATH)/components/freertos/include/freertos \
- 	$(IDF_PATH)/components/freertos/xtensa/include \
-	$(IDF_PATH)/components/freertos/xtensa/include/freertos \
+ 	$(IDF_PATH)/components/freertos/port \
+ 	$(IDF_PATH)/components/freertos/port/$(ESP_ARCH)/include \
+	$(IDF_PATH)/components/hal/include \
+	$(IDF_PATH)/components/hal/$(ESP32_SUBCLASS)/include \
 	$(IDF_PATH)/components/heap/include \
  	$(IDF_PATH)/components/log/include \
  	$(IDF_PATH)/components/lwip/include/apps/ \
@@ -137,12 +146,9 @@ INC_DIRS = \
  	$(IDF_PATH)/components/bt/host/nimble/nimble/porting/nimble/include \
  	$(IDF_PATH)/components/bt/host/nimble/nimble/porting/npl/freertos/include \
  	$(IDF_PATH)/components/bt/host/nimble/port/include \
- 	$(IDF_PATH)/components/soc/esp32/include \
- 	$(IDF_PATH)/components/soc/esp32/include/soc \
+ 	$(IDF_PATH)/components/soc/$(ESP32_SUBCLASS)/include \
  	$(IDF_PATH)/components/soc/include \
-	$(IDF_PATH)/components/soc/soc/$(ESP32_SUBCLASS)/include \
-	$(IDF_PATH)/components/soc/src/$(ESP32_SUBCLASS)/include \
-	$(IDF_PATH)/components/soc/soc/include \
+ 	$(IDF_PATH)/components/soc/include/soc \
  	$(IDF_PATH)/components/spiffs/include \
 	$(IDF_PATH)/components/fatfs/src \
 	$(IDF_PATH)/components/fatfs/vfs \

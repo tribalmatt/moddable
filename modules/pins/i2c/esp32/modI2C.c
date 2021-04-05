@@ -117,6 +117,7 @@ uint8_t modI2CActivate(modI2CConfiguration config)
 	}
 
 	conf.mode = I2C_MODE_MASTER;
+	conf.clk_flags = 0;
 #if MODDEF_I2C_PULLUPS
 	conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
 	conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
