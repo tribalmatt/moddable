@@ -194,9 +194,11 @@ bail:
 
 int nimbleClearWhitelist()
 {
-	ble_hs_lock();
-	ble_hs_hci_cmd_tx_empty_ack(BLE_HCI_OP(BLE_HCI_OGF_LE, BLE_HCI_OCF_LE_CLEAR_WHITE_LIST), NULL, 0);  
-    ble_hs_unlock();
+
+	//@@ TODO: ble_hs_hci_cmd_tx_empty_ack seems to have been removed in ESP-IDF v4.3. Looks like we need to transition to ble_hs_hci_cmd_tx
+	// ble_hs_lock();
+	// ble_hs_hci_cmd_tx_empty_ack(BLE_HCI_OP(BLE_HCI_OGF_LE, BLE_HCI_OCF_LE_CLEAR_WHITE_LIST), NULL, 0);  
+    // ble_hs_unlock();
     
     return 0;
 }
