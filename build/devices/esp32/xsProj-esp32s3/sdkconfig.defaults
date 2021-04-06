@@ -288,6 +288,9 @@ CONFIG_ESP32S2_RTC_CLK_CAL_CYCLES=576
 #
 # ADC-Calibration
 #
+# CONFIG_ADC_CAL_EFUSE_TP_ENABLE is not set
+# CONFIG_ADC_CAL_EFUSE_VREF_ENABLE is not set
+# CONFIG_ADC_CAL_LUT_ENABLE is not set
 # end of ADC-Calibration
 
 #
