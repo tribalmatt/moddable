@@ -16,7 +16,7 @@
 	"config": {
 		"screen": "",
 		"led": {
-			"pin": 18,
+			"pin": 47,
 			"rainbow": true,
 			"brightness": 32
 		}
