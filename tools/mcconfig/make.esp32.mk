@@ -29,7 +29,7 @@ EXPECTED_ESP_IDF ?= v4.3
 ESP32_SUBCLASS ?= esp32
 $(warning ESP32_SUBCLASS $(ESP32_SUBCLASS))
 
-ifeq ($(ESP32_SUBCLASS),"esp32s3")
+ifeq ($(ESP32_SUBCLASS),"esp32c3")
 	ESP_ARCH = riscv
 else
 	ESP_ARCH = xtensa
@@ -88,10 +88,14 @@ endif
 
 SDKCONFIG_H_DIR = $(IDF_BUILD_DIR)/config
 
-ifeq ("$(ESP32_SUBCLASS)","esp32s2")
-	ESP32_TARGET = 2
+ifeq ("$(ESP32_SUBCLASS)","esp32s3")
+	ESP32_TARGET = 3
 else
-	ESP32_TARGET = 1
+	ifeq ("$(ESP32_SUBCLASS)","esp32s2")
+		ESP32_TARGET = 2
+	else
+		ESP32_TARGET = 1
+	endif
 endif
 
 
