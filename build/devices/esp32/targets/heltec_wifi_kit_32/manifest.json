@@ -18,6 +18,8 @@
 			"sck_pin": 18
 		},
 		"ssd1306": {
+			"dither": true,
+			"//hz_alt_slower_refresh": 100000,
 			"hz": 400000,
 			"width": 128,
 			"height": 64,
