@@ -27,7 +27,7 @@ const UART_SERVER = "UART Server";
 
 class UARTServer extends BLEServer {
 	onReady() {
-		this.deviceName = "UART";
+		this.deviceName = "mvUART";
 		this.onDisconnected();
 	}
 	onConnected() {
@@ -39,6 +39,7 @@ class UARTServer extends BLEServer {
 			advertisingData: {flags: 6, completeName: this.deviceName, completeUUID128List: [SERVICE_UUID]}
 		});
 	}
+	// MV onCharacteristicNotifyEnabled is an echo...in this sample...
 	onCharacteristicNotifyEnabled(characteristic) {
 		this.tx = characteristic;
 	}
@@ -47,8 +48,12 @@ class UARTServer extends BLEServer {
 	}
 	onCharacteristicWritten(characteristic, value) {
 		trace.left(value, UART_SERVER);
+					
+		let anObject = JSON.parse(value);
+		trace(anObject);
+		anObject.response = "jsonUART"
 		if (this.tx)
-			this.notifyValue(this.tx, value);
+			this.notifyValue(this.tx, JSON.stringify(anObject));
 	}
 }
 
