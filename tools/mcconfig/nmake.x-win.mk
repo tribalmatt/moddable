@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2016-2021  Moddable Tech, Inc.
+# Copyright (c) 2016-2023 Moddable Tech, Inc.
 #
 #   This file is part of the Moddable SDK Tools.
 # 
@@ -65,7 +65,6 @@ XS_OBJECTS = \
 	$(LIB_DIR)\xsNumber.o \
 	$(LIB_DIR)\xsObject.o \
 	$(LIB_DIR)\xsPlatforms.o \
-	$(LIB_DIR)\xsProfile.o \
 	$(LIB_DIR)\xsPromise.o \
 	$(LIB_DIR)\xsProperty.o \
 	$(LIB_DIR)\xsProxy.o \
@@ -113,7 +112,8 @@ XS_C_FLAGS = \
 	/D WIN32 \
 	/D _CRT_SECURE_NO_DEPRECATE \
 	/D HAVE_MEMMOVE=1 \
-	/nologo
+	/nologo \
+	/MP
 !IF "$(DEBUG)"=="1"
 XS_C_FLAGS = $(XS_C_FLAGS) \
 	/D _DEBUG \
@@ -133,7 +133,7 @@ C_FLAGS = $(XS_C_FLAGS)
 
 RC_OPTIONS = /nologo
 
-LINK_LIBRARIES = ws2_32.lib advapi32.lib comctl32.lib comdlg32.lib gdi32.lib kernel32.lib user32.lib gdiplus.lib ole32.lib shell32.lib
+LINK_LIBRARIES = ws2_32.lib advapi32.lib comctl32.lib comdlg32.lib gdi32.lib kernel32.lib user32.lib gdiplus.lib ole32.lib shell32.lib winmm.lib
 
 LINK_OPTIONS = /incremental:no /nologo /MANIFEST:EMBED
 !IF "$(DEBUG)"=="1"
@@ -171,10 +171,14 @@ $(BIN_DIR)\$(NAME).exe: $(TMP_DIR)\main.res $(TMP_DIR)\mc.res $(XS_OBJECTS) $(TM
 	link $(LINK_OPTIONS) $(LINK_LIBRARIES) $(XS_OBJECTS) $(TMP_DIR)\mc.xs.o $(OBJECTS) $(TMP_DIR)\main.res $(TMP_DIR)\mc.res /out:$@
 	
 $(XS_OBJECTS) : $(XS_HEADERS)
-{$(XS_DIR)\sources\}.c{$(LIB_DIR)\}.o:
-	cl $(C_DEFINES) $(C_INCLUDES) $(XS_C_FLAGS) $< /Fo$@
-{$(XS_DIR)\platforms\}.c{$(LIB_DIR)\}.o:
-	cl $(C_DEFINES) $(C_INCLUDES) $(XS_C_FLAGS) $< /Fo$@
+{$(XS_DIR)\sources\}.c{$(LIB_DIR)\}.o::
+	cd $(LIB_DIR)
+	cl $(C_DEFINES) $(C_INCLUDES) $(XS_C_FLAGS) $<
+	rename *.obj *.o
+{$(XS_DIR)\platforms\}.c{$(LIB_DIR)\}.o::
+	cd $(LIB_DIR)
+	cl $(C_DEFINES) $(C_INCLUDES) $(XS_C_FLAGS) $<
+	rename *.obj *.o
 
 $(TMP_DIR)\mc.xs.o: $(TMP_DIR)\mc.xs.c $(HEADERS)
 	cl $(C_DEFINES) $(C_INCLUDES) $(XS_C_FLAGS) $(TMP_DIR)\mc.xs.c /Fo$@

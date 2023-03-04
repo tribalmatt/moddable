@@ -1,7 +1,6 @@
 # Piu JavaScript Reference
-
 Copyright 2017-2022 Moddable Tech, Inc.<BR>
-Revised: January 17, 2022
+Revised: January 24, 2022
 
 ## About This Document
 
@@ -37,6 +36,7 @@ Piu is a user interface framework designed to run on microcontrollers. The progr
  	 * [Port Object](#port-object)
  	 * [Row Object](#row-object)
  	 * [Scroller Object](#scroller-object)
+ 	 * [Shape Object](../commodetto/outline/Outlines.md)
  	 * [Skin Object](#skin-object)
  	 * [Sound Object](#sound-object)
  	 * [Style Object](#style-object)
@@ -141,6 +141,7 @@ sampleContent.coordinates = {
 };
 ```
 
+<a id="fitted-size"></a>
 ##### Fitted size
 
 All contents also have a *fitted width* and *fitted height*, which are the effective width and height of the content computed by its container.
@@ -425,22 +426,22 @@ All `content` objects have a `coordinates` property. The coordinates property is
 When a content's container is an `application`, `container`, `scroller`, or `layout` object:
 
 - `top`, `bottom`, `left`, and `right` coordinates are all relative to their container
-- If `width`, `left`, and `right` coordinates are all specified, the width will be overruled
+- If `width`, `left`, and `right` coordinates are all specified, the `left` and `right` coordinates will be overruled
 - If `left` and `right` are both unspecified, the content will be centered horizontally in its container with the width specified (or a width of 0, if unspecified)
-- If `height`, `top`, and `bottom` coordinates are all specified, the height will be overruled
+- If `height`, `top`, and `bottom` coordinates are all specified, the `top` and `bottom` coordinates will be overruled
 - If `top` and `bottom` are both unspecified, the content will be centered vertically in its container with the height specified (or a height of 0, if unspecified)
 
 When a content's container is a `column` object:
 
 -  `top` and `bottom` coordinates are relative to their `previous` and `next` properties
 - `left` and `right` coordinates are relative to their container
-- If `width`, `left`, and `right` coordinates are all specified, the width will be overruled
+- If `width`, `left`, and `right` coordinates are all specified, the `left` and `right` coordinates will be overruled
 
 When a content's container is a `row` object:
 
 - `left` and `right` coordinates are relative to their `previous` and `next` properties
 - `top` and `bottom`  coordinates are relative to their container
-- If `height`, `top`, and `bottom` coordinates are all specified, the height will be overruled
+- If `height`, `top`, and `bottom` coordinates are all specified, the `top` and `bottom` coordinates will be overruled
 
 ### Duration, Fraction, Interval, Loop, and Time
 
@@ -2606,7 +2607,7 @@ Same as for `container` object (see [Events](#container-events) in the section [
 | `layout` | `object` | The `layout` object that triggered the event
 | `width` | `number` | The fitted width of the `layout` object, in pixels
 
-This event is triggered when the fitted width of the `layout` object is calculated. Once this is triggered, the behavior can modify the coordinates of its contents. Returns the fitted width of the `layout` object, in pixels. 
+This event is triggered when the [fitted width](#fitted-size) of the `layout` object is calculated. Once this is triggered, the behavior can modify the coordinates of its contents. Returns the fitted width of the `layout` object, in pixels. 
 
 ***
 
@@ -2617,7 +2618,7 @@ This event is triggered when the fitted width of the `layout` object is calculat
 | `layout` | `object` | The `layout` object that triggered the event
 | `height` | `number` | The fitted height of the `layout` object, in pixels
 
-This event is triggered when the fitted height of the `layout` object is calculated. Once this is triggered, the behavior can modify the coordinates of its contents.  Returns the height of the `layout` object, in pixels.
+This event is triggered when the [fitted height](#fitted-size) of the `layout` object is calculated. Once this is triggered, the behavior can modify the coordinates of its contents.  Returns the height of the `layout` object, in pixels.
 
 ***
 
@@ -2628,7 +2629,7 @@ This event is triggered when the fitted height of the `layout` object is calcula
 | `layout` | `object` | The `layout` object that triggered the event
 | `width` | `number` | The measured width of the `layout` object, in pixels
 
-This event is triggered when the measured width of the `layout` object is calculated. Returns the measured width of the `layout` object, in pixels.
+This event is triggered when the [measured width](#measured-size) of the `layout` object is calculated. Returns the measured width of the `layout` object, in pixels.
 
 ***
 
@@ -2639,7 +2640,7 @@ This event is triggered when the measured width of the `layout` object is calcul
 | `layout` | `object` | The `layout` object that triggered the event
 | `height` | `number` | The measured height of the `layout` object, in pixels
 
-This event is triggered when the measured height of the `layout` object is calculated. Returns the measured height of the `layout` object, in pixels.
+This event is triggered when the [measured height](#measured-size) of the `layout` object is calculated. Returns the measured height of the `layout` object, in pixels.
 
 ***
 
@@ -3503,7 +3504,7 @@ If there is a `texture` or `Texture` property in the dictionary, the constructor
 | Parameter | Type | Description |
 | --- | --- | :--- |
 | `bottom` | `number` | The skin's bottom tile (setting the `bottom` parameter in the created instance, and `bottom` in the created instance's `tiles` property)
-| `color` | `string` | If the texture has only an alpha bitmap, the value of the `color` property will be used to colorize the bitmap. Must be a string or array of strings of the form specified in the [Colors](colors) section of this document.
+| `color` | `string` or `array` | If the texture has only an alpha bitmap, the value of the `color` property will be used to colorize the bitmap. Must be a string or array of strings of the form specified in the [Color](#color) section of this document.
 | `left` | `number` | The skin's left tile (setting the `left` parameter in the created instance, and `left` in the created instance's `tiles` property)
 | `right` | `number` | The skin's right tile (setting the `right` parameter in the created instance, and `right` in the created instance's `tiles` property)
 | `states` | `number` | This skin's vertical offset between states, in pixels
@@ -3535,7 +3536,7 @@ All properties of a `skin` object are read-only, but you can change the style of
 | Name | Type | Default Value | Description |
 | --- | --- | --- | --- |
 | `bottom` | `number` | 0 | The skin's bottom tile
-| `color` | `string` | | If the texture has only an alpha bitmap, the value of the `color` property will be used to colorize the bitmap. Must be a string or array of strings of the form specified in the [Colors](colors) section of this document.
+| `color` | `string` | | If the texture has only an alpha bitmap, the value of the `color` property will be used to colorize the bitmap. Must be a string or array of strings of the form specified in the [Color](#color) section of this document.
 | `bounds` | `object` | | The portion of the `texture` object to extract, as an object with `x`, `y`, `width`, and `height` number properties, specified in pixels
 | `height` | `number` | | This skin's height, in pixels
 | `left` | `number` | 0 | The skin's left tile
@@ -4319,7 +4320,7 @@ Called while this transition is running; called at least twice (with a `fraction
 [17]: ../../modules/piu/All/piuTransition.c "piuTransition.c"
 [30]: ../../modules/piu/MC/piuImage.c "piuImage.c"
 [33]: ../../modules/piu/All/piuTransition.c "piuTransition.c"
-[36]: ../../modules/piu/MC/piuTimeline.js "piuTimeline.js"
+[36]: ../../modules/piu/All/piuTimeline.js "piuTimeline.js"
 [37]: ../../modules/piu/MC/piuSound.c "piuSound.c"
 
 [18]: ../../examples/piu/balls "balls"

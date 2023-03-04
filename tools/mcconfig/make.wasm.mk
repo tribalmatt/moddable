@@ -64,7 +64,6 @@ XS_OBJECTS = \
 	$(LIB_DIR)/xsNumber.c.o \
 	$(LIB_DIR)/xsObject.c.o \
 	$(LIB_DIR)/xsPlatforms.c.o \
-	$(LIB_DIR)/xsProfile.c.o \
 	$(LIB_DIR)/xsPromise.c.o \
 	$(LIB_DIR)/xsProperty.c.o \
 	$(LIB_DIR)/xsProxy.c.o \
@@ -149,7 +148,7 @@ build: all
 $(LIB_DIR):
 	mkdir -p $(LIB_DIR)
 	
-$(BIN_DIR)/index.html: 	$(BUILD_DIR)/simulator/wasm/index.html
+$(BIN_DIR)/index.html: 	$(BUILD_DIR)/makefiles/wasm/index.html
 	@echo "# cp index.html"
 	cp $< $@
 	
@@ -180,7 +179,7 @@ $(TMP_DIR)/mc.resources.c: $(DATA) $(RESOURCES) $(MANIFEST)
 	@echo "# mcrez resources"
 	$(MCREZ) $(DATA) $(RESOURCES) -o $(TMP_DIR) -r mc.resources.c
 	
-$(TMP_DIR)/mc.main.c.o: $(BUILD_DIR)/simulator/wasm/main.c $(HEADERS)
+$(TMP_DIR)/mc.main.c.o: $(BUILD_DIR)/makefiles/wasm/main.c $(HEADERS)
 	@echo "# cc" $(<F)
 	$(CC) $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) $< -o $@
 	

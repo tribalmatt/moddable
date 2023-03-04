@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022 Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Tools.
  *
@@ -31,57 +31,18 @@ import * as ControlsPaneNamespace from "ControlsPane";
 import * as DevicePaneNamespace from "DevicePane";
 import * as assetsNamespace from "assets";
 
-const compartmentModuleMap = {
-	"piu/All": piuAllNamespace,
-	"piu/Buttons": piuButtonsNamespace,
-	"piu/PC": piuPCNamespace,
-	"piu/Screen": piuScreenNamespace,
-	"piu/Scrollbars": piuScrollbarsNamespace,
-	"piu/Sliders": piuSlidersNamespace,
-	"piu/Switches": piuSwitchesNamespace,
-	"BinaryMessage": BinaryMessageNamespace,
-	"ControlsPane": ControlsPaneNamespace,
-	"DevicePane": DevicePaneNamespace,
-	"assets": assetsNamespace,
-}
-const compartmentOptions = {
-	resolveHook(specifier, refererSpecifier) {
-		if (specifier[0] == '.') {
-			let dot = 1;
-			let slash = refererSpecifier.lastIndexOf("/");
-			if (specifier[1] == '.') {
-				dot++;
-				slash = refererSpecifier.lastIndexOf("/", slash - 1);
-			}
-			return refererSpecifier.slice(0, slash) + specifier.slice(dot);
-		}
-		return specifier;
-	},
-	loadNowHook(specifier) {
-		return new StaticModuleRecord({ source:system.readFileString(specifier) });
-	},
-}
-
 import {} from "piu/PC";
 
 import {
-	applicationStyle,
-	backgroundSkin,
-	buttonsSkin,
-	controlsMenuSkin,
-	controlsMenuGlyphSkin,
-	controlsMenuItemSkin,
-	controlsMenuItemStyle,
-	dotSkin,
-	paneBorderSkin,
-	paneHeaderSkin,
-	paneHeaderStyle,
-	paneFooterLeftStyle,
-	paneFooterRightStyle,
+	buildAssets
 } from "assets";
 
 import {
 	ButtonBehavior,
+	Button,
+	IconButton,
+	PopupMenuBehavior,
+	PopupMenu,
 } from "piu/Buttons";
 
 import { 
@@ -91,7 +52,6 @@ import {
 } from "piu/Dividers";
 
 import {
-	Button,
 	ControlsPane,
 } from "ControlsPane";
 
@@ -108,7 +68,8 @@ let noDevice = {
 	ControlsTemplate: Container.template($ => ({
 		left:0, right:0, top:0, bottom:0,
 		contents:[
-			Button({ label:"Locate..." }, {
+			Button($, { 
+				string:"Locate...",
 				Behavior: class extends ButtonBehavior {
 					onTap(container) {
 						container.bubble("doLocateSimulators");
@@ -117,20 +78,86 @@ let noDevice = {
 			}),
 		]
 	})),
-	DeviceTemplate: DeviceContainer.template($ => ({ Behavior:NoDeviceBehavior, width:480, height:320, contents:[
-		DeviceScreen($, { width:480, height:320 }),
-	]})),
+	DeviceTemplates: {
+		0: DeviceContainer.template($ => ({
+			Behavior:NoDeviceBehavior, width:480, height:320,
+			contents:[
+				DeviceScreen($, { width:480, height:320 }),
+			]
+		})),
+		90: DeviceContainer.template($ => ({
+			Behavior:NoDeviceBehavior, width:320, height:480,
+			contents:[
+				DeviceScreen($, { width:320, height:480 }),
+			]
+		})),
+		180: DeviceContainer.template($ => ({
+			Behavior:NoDeviceBehavior, width:480, height:320,
+			contents:[
+				DeviceScreen($, { width:480, height:320 }),
+			]
+		})),
+		270: DeviceContainer.template($ => ({
+			Behavior:NoDeviceBehavior, width:320, height:480,
+			contents:[
+				DeviceScreen($, { width:320, height:480 }),
+			]
+		})),
+	}
 };
 
 class ApplicationBehavior extends Behavior {
 	onCreate(application) {
+		this.compartmentOptions = {
+			globals: { ...Object.getPrototypeOf(globalThis), ...globalThis, Date, Math },
+			modules: {
+				"piu/All": { namespace: piuAllNamespace },
+				"piu/Buttons": { namespace: piuButtonsNamespace },
+				"piu/PC": { namespace: piuPCNamespace },
+				"piu/Screen": { namespace: piuScreenNamespace },
+				"piu/Scrollbars": { namespace: piuScrollbarsNamespace },
+				"piu/Sliders": { namespace: piuSlidersNamespace },
+				"piu/Switches": { namespace: piuSwitchesNamespace },
+				"BinaryMessage": { namespace: BinaryMessageNamespace },
+				"ControlsPane": { namespace: ControlsPaneNamespace },
+				"DevicePane": { namespace: DevicePaneNamespace },
+				"assets": { namespace: assetsNamespace },
+			},
+			resolveHook(specifier, refererSpecifier) {
+				if (specifier[0] == '.') {
+					let separator = '/';
+					if (system.platform == "win") {
+						separator = '\\';
+						specifier = specifier.replaceAll('/', '\\');
+					}
+					let dot = 1;
+					let slash = refererSpecifier.lastIndexOf(separator);
+					if (specifier[1] == '.') {
+						dot++;
+						slash = refererSpecifier.lastIndexOf(separator, slash - 1);
+					}
+					return refererSpecifier.slice(0, slash) + specifier.slice(dot);
+				}
+				return specifier;
+			},
+			loadNowHook(specifier) {
+				return { source:new ModuleSource(system.readFileString(specifier)), importMeta:{ uri:specifier } };
+			},
+		};
+		
+		
 		let extension = (system.platform == "win") ? "dll" : "so";
 		global.model = this;
   		application.interval = 100;
 		
 		this.keys = {};
+		this.appearance = 0;
+		if (system.platform == "mac")
+			this.colors = 2;
+		else
+			this.colors = 0;
 		this.controlsCurrent = 320;
-		this.controlsStatus = false;
+		this.controlsStatus = true;
 		this.infoStatus = true;
 		
 		let path = system.applicationPath;
@@ -166,10 +193,34 @@ class ApplicationBehavior extends Behavior {
 		}
 		catch {
 		}
-
-		application.add(new MainContainer(this));
+	}
+	onAppearanceChanged(application, which) {
+		buildAssets(which);
+		if (application.first) {
+			this.quitScreen();
+			application.replace(application.first, new MainContainer(this));
+			this.reloadDevices(application);
+			this.launchScreen();
+		}
+	}
+	onAppearanceChanged(application, which) {
+		this.appearance = which;
+		this.onColorsChanged(application);
+	}
+	onColorsChanged(application) {
+		let appearance = this.colors;
+		if (appearance == 2)
+			appearance = this.appearance;
+		buildAssets(appearance);
+		if (application.first) {
+			this.quitScreen();
+			application.replace(application.first, new MainContainer(this));
+			this.reloadDevices(application);
+			this.launchScreen();
+		}
 	}
 	onDisplaying(application) {
+		application.add(new MainContainer(this));
 		if (this.devicesPath)
 			this.reloadDevices(application);
 		else
@@ -215,14 +266,13 @@ class ApplicationBehavior extends Behavior {
 		this.selectDevice(application, -1);
 		
 		application.purge();
-			
 		let iterator = new system.DirectoryIterator(this.devicesPath);
 		let info = iterator.next();
 		while (info) {
 			if (!info.directory) {
 				if (info.name.endsWith(".js")) {
 					try {
-						let compartment = new Compartment({...Object.getPrototypeOf(globalThis), ...globalThis}, compartmentModuleMap, compartmentOptions);
+						let compartment = new Compartment(this.compartmentOptions);
 						let device = compartment.importNow(info.path).default;
 						if (device && (("DeviceTemplate" in device) || ("DeviceTemplates" in device))) {
 							device.compartment = compartment;
@@ -248,14 +298,15 @@ class ApplicationBehavior extends Behavior {
 			}
 			info = iterator.next();
 		}
-		devices.sort((a, b) => a.sortingTitle.localeCompare(b.sortingTitle));
-		
 		let length = devices.length;
-		if (index < 0)
-			index = 0;
-		else if (index >= length)
-			index = length - 1;
-		this.selectDevice(application, index);
+		if (length > 0) {		
+			devices.sort((a, b) => a.sortingTitle.localeCompare(b.sortingTitle));
+			if (index < 0)
+				index = 0;
+			else if (index >= length)
+				index = length - 1;
+			this.selectDevice(application, index);
+		}
 	}
 	selectDevice(application, index) {
 		application.distribute("onDeviceUnselected");
@@ -356,7 +407,7 @@ class ApplicationBehavior extends Behavior {
 		system.alert({ 
 			type:"about",
 			prompt:"mcsim",
-			info:"Copyright 2018 Moddable Tech, Inc.\nAll rights reserved.\n\nThis application incorporates open source software from Marvell, Inc. and others.",
+			info:"Copyright 2018-2022 Moddable Tech, Inc.\nAll rights reserved.\n\nThis application incorporates open source software from Marvell, Inc. and others.",
 			buttons:["OK"]
 		}, ok => {
 		});
@@ -383,6 +434,12 @@ class ApplicationBehavior extends Behavior {
 	canReloadSimulators() {
 		return true;
 	}
+	canSaveScreen() {
+		return this.SCREEN && this.SCREEN.running;
+	}
+	canSaveSequence() {
+		return this.SCREEN && this.SCREEN.running;
+	}
 	doCloseApp() {
 		this.libraryPath = "";
 		this.quitScreen();
@@ -399,11 +456,14 @@ class ApplicationBehavior extends Behavior {
 	doOpenFileCallback(application, path) {
 		let extension = (system.platform == "win") ? ".dll" : ".so";
 		if (path.endsWith(extension)) {
-			let index = this.devices.findIndex(device => device.applicationFilter.test(path));
-			if (index < 0) index = 0;
 			this.quitScreen();
-			if (index != this.deviceIndex)
-				this.selectDevice(application, index);
+			const devices = this.devices;
+			if (devices.length > 0) {
+				let index = devices.findIndex(device => device.applicationFilter.test(path));
+				if (index < 0) index = 0;
+				if (index != this.deviceIndex)
+					this.selectDevice(application, index);
+			}
 			this.libraryPath = path;
 			this.launchScreen();
 		}
@@ -430,6 +490,23 @@ class ApplicationBehavior extends Behavior {
 		this.quitScreen();
 		this.reloadDevices(application);
 		this.launchScreen();
+	}
+	doSaveScreen() {
+		system.saveFile({ prompt:"Save Screen", name:"screen.png" }, path => { if (path) application.defer("doSaveScreenCallback", new String(path)); });
+	}
+	doSaveScreenCallback(application, path) {
+		try  {
+			this.SCREEN.writePNG(path);
+		}
+		catch (e){
+			system.alert({ 
+				type:"stop",
+				prompt:"mcsim",
+				info:`Error saving ${path}: ${e}`,
+				buttons:["Cancel"]
+			}, ok => {
+			});
+		}
 	}
 /* VIEW MENU */
 	canToggleControls(target, item) {
@@ -484,6 +561,8 @@ class ApplicationBehavior extends Behavior {
 			let string = system.readPreferenceString("main");
 			if (string) {
 				let preferences = JSON.parse(string);
+				if ("colors" in preferences)
+					this.colors = preferences.colors;
 				if ("controlsCurrent" in preferences)
 					this.controlsCurrent = preferences.controlsCurrent;
 				if ("controlsStatus" in preferences)
@@ -496,10 +575,6 @@ class ApplicationBehavior extends Behavior {
 					this.deviceIndex = preferences.deviceIndex;
 				if ("deviceRotation" in preferences)
 					this.deviceRotation = preferences.deviceRotation;
-				if (("libraryPath" in preferences) && system.fileExists(preferences.libraryPath))
-					this.libraryPath = preferences.libraryPath;
-				if (("archivePath" in preferences) && system.fileExists(preferences.archivePath))
-					this.archivePath = preferences.archivePath;
 			}
 		}
 		catch(e) {
@@ -511,14 +586,13 @@ class ApplicationBehavior extends Behavior {
 		try {
 			let content;
 			let preferences = {
+				colors: this.colors,
 				controlsCurrent: this.controlsCurrent,
 				controlsStatus: this.controlsStatus,
 				infoStatus: this.infoStatus,
 				devicesPath: this.devicesPath,
 				deviceIndex: this.deviceIndex,
 				deviceRotation: this.deviceRotation,
-				libraryPath: this.libraryPath,
-				archivePath: this.archivePath,
 			};
 			let string = JSON.stringify(preferences, null, "\t");
 			system.writePreferenceString("main", string);
@@ -527,49 +601,6 @@ class ApplicationBehavior extends Behavior {
 		}
 	}
 }
-
-class HeaderBehavior extends Behavior {	
-	onDeviceSelected(row, device) {
-		const glyph = row.first;
-		const label = glyph.next;
-		label.string = device.title;
-		if (model.devices.length > 0) {
-			glyph.state = 1;
-			label.state = 1;
-		}
-		else {
-			glyph.state = 0;
-			label.state = 0;
-		}
-	}
-	onMenuSelected(row, index) {
-		if (index >= 0)
-			model.onSelectDevice(application, index);
-	}
-	onMouseEntered(row, x, y) {
-		if (model.devices.length > 1)
-			row.state = 1;
-	}
-	onMouseExited(row, x, y) {
-		if (model.devices.length > 1)
-			row.state = 0;
-	}
-	onTouchBegan(row) {
-		if (model.devices.length > 1)
-			row.state = 2;
-	}
-	onTouchEnded(row) {
-		if (model.devices.length > 1) { 
-			row.state = 1;
-			let data = {
-				button: row,
-				items: model.devices.map((device, index) => ({ title: device.title, index })),
-			};
-			data.items.splice(model.deviceIndex, 1);
-			application.add(new ControlsMenu(data));
-		}
-	}
-};
 
 const pixelFormatNames = [
 	"16-bit RGB 565 Little Endian",
@@ -600,15 +631,39 @@ class FooterBehavior extends Behavior {
 	}
 };
 
-class ControlsMenuBehavior extends Behavior {	
-	onClose(layout, index) {
-		let data = this.data;
-		application.remove(application.last);
-		data.button.delegate("onMenuSelected", index);
+class ControlsButtonBehavior extends ButtonBehavior {
+	changeState(container, state) {
+		var content = container.first
+		content.state = state;
+		content = content.next.first;
+		while (content) {
+			content.state = state;
+			content = content.next;
+		}
 	}
-	onCreate(layout, data) {
-		this.data = data;
+	onDeviceSelected(container, device) {
+		container.first.next.first.next.string = device.title;
+		const active = container.active = model.devices.length > 0;
+		this.changeState(container, active ? 1 : 0);
 	}
+	onMenuSelected(row, index) {
+		if (index >= 0)
+			model.onSelectDevice(application, this.data.items[index].value);
+	}
+	onTap(container) {
+		const devices = model.devices;
+		if (devices.length) {
+			this.data = {
+				button: container,
+				items: devices.map((device, index) => ({ title: device.title, value:index })),
+			};
+			this.data.items.splice(model.deviceIndex, 1);
+			application.add(new PopupMenu(this.data, { Behavior:ControlsMenuBehavior } ));
+		}
+	}
+}
+	
+class ControlsMenuBehavior extends PopupMenuBehavior {	
 	onFitVertically(layout, value) {
 		let data = this.data;
 		let button = data.button;
@@ -617,68 +672,94 @@ class ControlsMenuBehavior extends Behavior {
 		let size = scroller.first.measure();
 		let y = button.y + button.height + 1
 		let height = Math.min(size.height, application.height - y - 20);
-		container.coordinates = { left:button.x, width:size.width + 20, top:y, height:height + 10 }
-		scroller.coordinates = { left:10, width:size.width, top:0, height:height }
-// 		scroller.first.content(model.deviceIndex).first.visible = true;
+		container.coordinates = { left:0, width:size.width + 30, top:y, height:height + 10 }
+		scroller.coordinates = { left:10, width:size.width + 10, top:0, height:height }
 		return value;
-	}
-	onTouchEnded(layout, id, x, y, ticks) {
-		var content = layout.first.first.first;
-		if (!content.hit(x, y))
-			this.onClose(layout, -1);
 	}
 };
 
-class ControlsMenuItemBehavior extends ButtonBehavior {
-	onTap(item) {
-		item.bubble("onClose", this.data.index);
+class ColorsButtonBehavior extends ButtonBehavior {
+	onCreate(container) {
+		const data = {
+			button: container,
+			items: [
+				{ title:"Light Colors", value:0 },
+				{ title:"Dark Colors", value:1 }
+			],
+		};
+		if (system.platform == "mac")
+			data.items.push({ title:"Default", value:2 });
+		data.selection = data.items.findIndex(item => item.value == model.colors);
+		super.onCreate(container, data);
+	}
+	onMenuSelected(container, index) {
+		const data = this.data;
+		if ((index >= 0) && (data.selection != index)) {
+			let item = data.items[index];
+			data.selection = index;
+			model.colors = data.items[index].value;
+			application.delegate("onColorsChanged");
+		}
+	}
+	onTap(container) {
+		application.add(new PopupMenu(this.data, { Behavior:ColorsMenuBehavior } ));
 	}
 }
 
-var ControlsMenu = Layout.template($ => ({
-	left:0, right:0, top:0, bottom:0, active:true, backgroundTouch:true,
-	Behavior: ControlsMenuBehavior,
-	contents: [
-		Container($, { skin:controlsMenuSkin, contents:[
-			Scroller($, { clip:true, active:true, contents:[
-				Column($, { left:0, right:0, top:0, 
-					contents: $.items.map($$ => new ControlsMenuItem($$)),
-				}),
-			]}),
-		]}),
-	],
-}));
-
-var ControlsMenuItem = Row.template($ => ({
-	left:0, right:0, height:30, skin:controlsMenuItemSkin, active:true,
-	Behavior:ControlsMenuItemBehavior,
-	contents: [
-		Content($, { width:20, height:30, skin:dotSkin, visible:false }),
-		Label($, {left:0, right:20, height:30, style:controlsMenuItemStyle, string:$.title }),
-	]
-}));
+class ColorsMenuBehavior extends PopupMenuBehavior {
+	onFitVertically(layout, value) {
+		let data = this.data;
+		let button = data.button;
+		let container = layout.first;
+		let scroller = container.first;
+		let size = scroller.first.measure();
+		let y = button.y + button.height + 1
+		let height = Math.min(size.height, application.height - y - 20);
+		container.coordinates = { right:0, width:size.width + 30, top:y, height:height + 10 };
+		scroller.coordinates = { left:10, width:size.width + 10, top:0, height:height };
+		scroller.first.content(data.selection).first.visible = true;
+		return value;
+	}
+}
 
 var MainContainer = Container.template($ => ({ 
 	left:0, right:0, top:0, bottom:0, 
 	contents: [
-		Row($, { left:0, right:0, top:0, height:26, skin:paneHeaderSkin, active:true, Behavior:HeaderBehavior, contents: [
-			Content($, { width:30, height:26, skin:controlsMenuGlyphSkin, }),
-			Label($, { left:0, right:0, style:paneHeaderStyle, }),
-			Content($, {
-				width:30, skin:buttonsSkin, variant:3, active:true, visible:true, 
+		Row($, { left:0, right:0, top:0, height:26, skin:skins.paneHeader, contents: [
+			Container($, {
+				left:0, top:0, bottom:0, active:true, Behavior:ControlsButtonBehavior,
+				contents: [
+					RoundContent($, { left:2, right:2, top:2, bottom:2, radius:4, skin:skins.iconButton }),
+					Row($, {
+						left:0, top:0, bottom:0,
+						contents: [
+							Content($, { width:30, height:30, skin:skins.icons, variant:0 }),
+							Label($, { left:0, top:0, bottom:0, style:styles.iconButton, }),
+							Content($, { width:10, height:30 }),
+						]
+					}),
+				]
+			}),
+			Content($, { left:0, right:0 }),
+			IconButton($, {
+				variant:1, 
 				Behavior: class extends ButtonBehavior {
 					onTap(button) {
 						button.bubble("onRotate", 90);
 					}
 				},
 			}),
+			IconButton($, {
+				variant:2, 
+				Behavior: ColorsButtonBehavior,
+			}),
 		]}), 
-		Content($, { left:0, right:0, top:26, height:1, skin:paneBorderSkin, }),
+		Content($, { left:0, right:0, top:26, height:1, skin:skins.paneBorder, }),
 		Layout($, { anchor:"BODY", left:0, right:0, top:27, bottom:$.infoStatus ? 27 : 0, Behavior:DividerLayoutBehavior, contents: [
 			Container($, { left:0, width:0, top:0, bottom:0, contents: [
 				ControlsPane($, { anchor:"CONTROLS" }),
 			]}),
-			Container($, { anchor:"DEVICE", width:0, right:0, top:0, bottom:0, skin:backgroundSkin, clip:true, contents:[
+			Container($, { anchor:"DEVICE", width:0, right:0, top:0, bottom:0, skin:skins.background, clip:true, contents:[
 				Content($, {}),
 			]}),
 			VerticalDivider($, { 
@@ -687,17 +768,17 @@ var MainContainer = Container.template($ => ({
 			}),
 		]}),
 		Container($, { anchor:"FOOTER", left:0, right:0, height:$.infoStatus ? 27 : 0, bottom:0, clip:true, contents:[
-			Content($, { left:0, right:0, height:1, bottom:26, skin:paneBorderSkin, }),
-			Row($, { left:0, right:0, height:26, bottom:0, skin:paneHeaderSkin, Behavior:FooterBehavior, contents: [
-				Label($, { left:0, right:0, style:paneFooterLeftStyle, }),
-				Label($, { left:0, right:0, style:paneFooterRightStyle, }),
+			Content($, { left:0, right:0, height:1, bottom:26, skin:skins.paneBorder, }),
+			Row($, { left:0, right:0, height:26, bottom:0, skin:skins.paneHeader, Behavior:FooterBehavior, contents: [
+				Label($, { left:0, right:0, style:styles.paneFooterLeft, }),
+				Label($, { left:0, right:0, style:styles.paneFooterRight, }),
 			]}), 
 		]}),
 	]
 }));
 
 let mcsimApplication = Application.template($ => ({
-	style:applicationStyle,
+	style:{ font:"12px Open Sans" },
 	Behavior: ApplicationBehavior,
 	contents: [
 	],
@@ -727,6 +808,8 @@ let mcsimApplication = Application.template($ => ({
 				{ title:"Locate Simulators...", key:"L", command:"LocateSimulators" },
 				{ title:"Reload Simulators", shift:true, key:"R", command:"ReloadSimulators" },
 				null,
+// 				{ title:"Save Screen...", key:"S", command:"SaveScreen" },
+// 				null,
 				{ title:"Quit", key:"Q", command:"Quit" },
 			],
 		},

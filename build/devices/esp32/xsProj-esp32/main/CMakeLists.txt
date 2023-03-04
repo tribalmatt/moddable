@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2022 Moddable Tech, Inc.
+# Copyright (c) 2022-2023 Moddable Tech, Inc.
 #
 #   This file is part of the Moddable SDK Tools.
 # 
@@ -19,8 +19,9 @@
 
 
 file(TO_CMAKE_PATH "$ENV{MODDABLE}" ENV_MODDABLE)
+file(TO_CMAKE_PATH "${TMP_DIR}" C_TMP_DIR)
 set(COMPONENT_SRCS "main.c")
-set(COMPONENT_ADD_INCLUDEDIRS ${ENV_MODDABLE}/xs/platforms/esp  ${ENV_MODDABLE}/xs/platforms/mc ${ENV_MODDABLE}/xs/includes ${ENV_MODDABLE}/modules/base/instrumentation)
+set(COMPONENT_ADD_INCLUDEDIRS ${ENV_MODDABLE}/xs/platforms/esp  ${ENV_MODDABLE}/xs/platforms/mc ${ENV_MODDABLE}/xs/includes ${ENV_MODDABLE}/modules/base/instrumentation ${C_TMP_DIR})
 
 register_component()
 
@@ -30,9 +31,12 @@ endif()
 if (DEBUGGER_SPEED)
     target_compile_options(${COMPONENT_TARGET} PRIVATE -DDEBUGGER_SPEED=${DEBUGGER_SPEED})
 endif()
+if (INSTRUMENT EQUAL "1")
+    target_compile_options(${COMPONENT_TARGET} PRIVATE -DMODINSTRUMENTATION=1)
+endif()
 
 add_prebuilt_library(xsesp32 ${CMAKE_BINARY_DIR}/xs_${ESP32_SUBCLASS}.a
-             PRIV_REQUIRES driver nvs_flash esp_adc_cal vfs spiffs fatfs bt)
+             PRIV_REQUIRES driver nvs_flash esp_adc_cal vfs spiffs fatfs bt esp_eth)
 
 target_link_libraries(${COMPONENT_LIB} PRIVATE xsesp32)
 

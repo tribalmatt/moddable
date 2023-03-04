@@ -297,6 +297,7 @@ struct PiuStyleStruct {
 	PiuHandlePart;
 	PiuAssetPart;
 	xsMachine* the;
+	xsSlot* archive;
 	PiuFont* font;
 	xsIdentifier family;
 	xsIntegerValue size;
@@ -407,6 +408,8 @@ enum {
 	/* Window */
 	piuAdjusting = 1 << 24,
 	piuMenusChanged = 1 << 25,
+	
+	piuOrderChanged = 1 << 28,
 };
 
 
@@ -795,7 +798,7 @@ extern int mcCountResources(xsMachine* the);
 extern const char* mcGetResourceName(xsMachine* the, int i);
 extern const void *mcGetResource(xsMachine* the, const char* path, size_t* size);
 
-extern const void *fxGetResource(xsMachine* the, const char* path, size_t* size);
+extern const void *fxGetResource(xsMachine* the, void* archive, const char* path, size_t* size);
 
 // XS
 

@@ -1,0 +1,9 @@
+{
+	"include": [
+		"./manifest_httpclient.json",
+		"$(MODDABLE)/modules/data/text/decoder/manifest.json"
+	],
+	"modules": {
+		"*": "./main"
+	}
+}

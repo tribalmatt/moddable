@@ -37,6 +37,7 @@
 
 #include "xsAll.h"
 #if mxRegExp
+static txNumber fxAdvanceStringIndex(txString string, txNumber index, txBoolean unicodeFlag);
 static txSlot* fxCheckRegExpInstance(txMachine* the, txSlot* slot);
 static void fxExecuteRegExp(txMachine* the, txSlot* regexp, txSlot* argument);
 #endif
@@ -75,7 +76,7 @@ void fxBuildRegExp(txMachine* the)
 	slot = fxLastProperty(the, slot);
 	slot = fxNextHostAccessorProperty(the, slot, mxCallback(fx_species_get), C_NULL, mxID(_Symbol_species), XS_DONT_ENUM_FLAG);
 	mxPop();
-	fxNewHostFunction(the, mxCallback(fxInitializeRegExp), 2, XS_NO_ID);
+	fxNewHostFunction(the, mxCallback(fxInitializeRegExp), 2, XS_NO_ID, XS_NO_ID);
 	mxInitializeRegExpFunction = *the->stack;
 	
 	mxPush(mxIteratorPrototype);
@@ -88,6 +89,24 @@ void fxBuildRegExp(txMachine* the)
 }
 
 #if mxRegExp
+txNumber fxAdvanceStringIndex(txString string, txNumber index, txBoolean unicodeFlag)
+{
+#if mxCESU8
+	if (unicodeFlag) {
+		txInteger character;
+		txSize offset = fxUnicodeLength(string);
+		if (index >= offset)
+			return index + 1;
+		string += fxUnicodeToUTF8Offset(string, (txInteger)index);
+		offset = mxPtrDiff(mxStringByteDecode(string, &character) - string);
+		if (character == C_EOF)
+			return index + 1;
+		return index + fxUTF8ToUnicodeOffset(string, offset);
+	}
+#endif
+	return index + 1;
+}
+
 txSlot* fxCheckRegExpInstance(txMachine* the, txSlot* slot)
 {
 	if (slot->kind == XS_REFERENCE_KIND) {
@@ -263,7 +282,7 @@ void fx_RegExp_prototype_get_flag(txMachine* the, txU4 flag)
 void fx_RegExp_prototype_get_flags(txMachine* the)
 {
 #if mxRegExp
-	char flags[7];
+	char flags[8];
 	txIndex index = 0;
 	if (mxThis->kind != XS_REFERENCE_KIND)
 		mxTypeError("this is no object");
@@ -432,6 +451,7 @@ void fx_RegExp_prototype_exec(txMachine* the)
 	txSlot* instance = fxCheckRegExpInstance(the, mxThis);
 	txSlot* regexp = instance->next;
 	txSlot* argument;
+	txSlot* temporary;
 	txNumber lastIndex;
 	txInteger flags;
 	txBoolean globalFlag;
@@ -446,6 +466,15 @@ void fx_RegExp_prototype_exec(txMachine* the)
 		mxPushUndefined();
 	fxToString(the, the->stack);
 	argument = the->stack;
+	
+	if (regexp->value.regexp.data == C_NULL) {
+		mxTemporary(temporary);
+		temporary->value.regexp.code = C_NULL;
+		temporary->value.regexp.data = fxAllocateRegExpData(the, regexp->value.regexp.code);
+		temporary->kind = XS_REGEXP_KIND;
+	}
+	else
+		temporary = regexp;
 
 	mxPushSlot(mxThis);
 	mxGetID(mxID(_lastIndex));
@@ -460,7 +489,7 @@ void fx_RegExp_prototype_exec(txMachine* the)
 	stickyFlag = (flags & XS_REGEXP_Y) ? 1 : 0;
 	hasIndicesFlag = (flags & XS_REGEXP_D) ? 1 : 0;
 	offset = (globalFlag || stickyFlag) ? fxUnicodeToUTF8Offset(argument->value.string, (txInteger)lastIndex) : 0;
-	if ((offset >= 0) && fxMatchRegExp(the, regexp->value.regexp.code, regexp->value.regexp.data, argument->value.string, offset)) {
+	if ((offset >= 0) && fxMatchRegExp(the, regexp->value.regexp.code, temporary->value.regexp.data, argument->value.string, offset)) {
 		txSlot* resultArray;
 		txSlot* resultItem;
 		txSlot* indicesArray;
@@ -473,7 +502,7 @@ void fx_RegExp_prototype_exec(txMachine* the)
 		txInteger index;
 		txInteger length;
 		if (globalFlag || stickyFlag) {
-			index = fxUTF8ToUnicodeOffset(argument->value.string, regexp->value.regexp.data[1]);
+			index = fxUTF8ToUnicodeOffset(argument->value.string, temporary->value.regexp.data[1]);
 			mxPushInteger(index);
 			mxPushSlot(mxThis);
 			mxSetID(mxID(_lastIndex));
@@ -497,25 +526,28 @@ void fx_RegExp_prototype_exec(txMachine* the)
 		}
 		count = regexp->value.regexp.code[1];
 		for (index = 0; index < count; index++) {
-			txInteger start = regexp->value.regexp.data[2 * index];
+			txInteger start = temporary->value.regexp.data[2 * index];
 			resultItem = resultItem->next = fxNewSlot(the);
 			if (hasIndicesFlag)
 				indicesItem = indicesItem->next = fxNewSlot(the);
 			if (start >= 0) {
-				txInteger end = regexp->value.regexp.data[(2 * index) + 1];
+				txInteger end = temporary->value.regexp.data[(2 * index) + 1];
 				length = end - start;
 				resultItem->value.string = (txString)fxNewChunk(the, length + 1);
 				c_memcpy(resultItem->value.string, argument->value.string + start, length);
 				resultItem->value.string[length] = 0;
 				resultItem->kind = XS_STRING_KIND;
 				if (hasIndicesFlag) {
+					start = fxUTF8ToUnicodeOffset(argument->value.string, start);
+					end = start + fxUTF8ToUnicodeOffset(argument->value.string + start, length);
 					mxPushInteger(start);
 					mxPushInteger(end);
 					fxConstructArrayEntry(the, indicesItem);
 				}
 			}
 			if (namedFlag) {
-				txID name = (txID)(regexp->value.regexp.code[2 + index]);
+				txInteger tmp = regexp->value.regexp.code[2 + index];
+				txID name = (txID)tmp;
 				if (name != XS_NO_ID) {
 					resultProperty = resultProperty->next = fxNewSlot(the);
 					resultProperty->value = resultItem->value;
@@ -549,7 +581,7 @@ void fx_RegExp_prototype_exec(txMachine* the)
 		resultItem = resultItem->next = fxNewSlot(the);
 		resultItem->ID = mxID(_index);
 		resultItem->kind = XS_INTEGER_KIND;
-		resultItem->value.integer = fxUTF8ToUnicodeOffset(argument->value.string, regexp->value.regexp.data[0]);
+		resultItem->value.integer = fxUTF8ToUnicodeOffset(argument->value.string, temporary->value.regexp.data[0]);
 		resultItem = resultItem->next = fxNewSlot(the);
 		resultItem->ID = mxID(_input);
 		resultItem->value.string = argument->value.string;
@@ -597,8 +629,10 @@ void fx_RegExp_prototype_match(txMachine* the)
 	mxGetID(mxID(_global));
 	if (fxToBoolean(the, the->stack++)) {
 		txIndex count = 0;
+		txBoolean unicodeFlag;
 		mxPushSlot(mxThis);
 		mxGetID(mxID(_unicode));
+		unicodeFlag = fxToBoolean(the, the->stack);
 		mxPop();
 		mxPushInteger(0);
 		mxPushSlot(mxThis);
@@ -623,8 +657,8 @@ void fx_RegExp_prototype_match(txMachine* the)
 			if (c_isEmpty(the->stack->value.string)) {
 				mxPushSlot(mxThis);
 				mxGetID(mxID(_lastIndex));
-				fxToInteger(the, the->stack);
-				the->stack->value.integer++;
+				fxToLength(the, the->stack);
+				the->stack->value.number = fxAdvanceStringIndex(argument->value.string, the->stack->value.number, unicodeFlag);
 				mxPushSlot(mxThis);
 				mxSetID(mxID(_lastIndex));
 				mxPop();
@@ -645,7 +679,8 @@ void fx_RegExp_prototype_matchAll(txMachine* the)
 {
 #if mxRegExp
 	txSlot* argument;
-	txBoolean global = 0;
+	txBoolean globalFlag = 0;
+	txBoolean unicodeFlag = 0;
 	txSlot* matcher;
 	txSlot* iterator;
 	txSlot* property;
@@ -667,7 +702,9 @@ void fx_RegExp_prototype_matchAll(txMachine* the)
 	mxPushSlot(mxThis);
 	mxGetID(mxID(_flags));
 	if (c_strchr(fxToString(the, the->stack), 'g'))
-		global = 1;
+		globalFlag = 1;
+	if (c_strchr(fxToString(the, the->stack), 'u'))
+		unicodeFlag = 1;
 	mxRunCount(2);
 	matcher = the->stack;
 	
@@ -682,7 +719,8 @@ void fx_RegExp_prototype_matchAll(txMachine* the)
 	property = fxLastProperty(the, iterator);
 	property->kind = argument->kind;
 	property->value = argument->value;
-	property = fxNextBooleanProperty(the, property, global, XS_NO_ID, XS_INTERNAL_FLAG);
+	property = fxNextBooleanProperty(the, property, globalFlag, XS_NO_ID, XS_INTERNAL_FLAG);
+	property = fxNextBooleanProperty(the, property, unicodeFlag, XS_NO_ID, XS_INTERNAL_FLAG);
 	property = fxNextBooleanProperty(the, property, 0, XS_NO_ID, XS_INTERNAL_FLAG);
 	mxPullSlot(mxResult);
 #endif
@@ -693,12 +731,13 @@ void fx_RegExp_prototype_matchAll_next(txMachine* the)
 #if mxRegExp
 	txSlot* iterator = fxCheckIteratorInstance(the, mxThis, mxID(_RegExp));
 	txSlot* result = iterator->next;
-	txSlot* value = result->value.reference->next;
+	txSlot* value = fxCheckIteratorResult(the, result);
 	txSlot* done = value->next;
 	txSlot* matcher = result->next;
 	txSlot* argument = matcher->next;
 	txSlot* global = argument->next;
-	txSlot* complete = global->next;
+	txSlot* unicode = global->next;
+	txSlot* complete = unicode->next;
 	txSlot* match;
 	if (complete->value.boolean) {
 		value->kind = XS_UNDEFINED_KIND;
@@ -719,8 +758,8 @@ void fx_RegExp_prototype_matchAll_next(txMachine* the)
 			if (c_isEmpty(the->stack->value.string)) {
 				mxPushSlot(matcher);
 				mxGetID(mxID(_lastIndex));
-				fxToInteger(the, the->stack);
-				the->stack->value.integer++;
+				fxToLength(the, the->stack);
+				the->stack->value.number = fxAdvanceStringIndex(argument->value.string, the->stack->value.number, unicode->value.boolean);
 				mxPushSlot(matcher);
 				mxSetID(mxID(_lastIndex));
 				mxPop();
@@ -736,6 +775,7 @@ void fx_RegExp_prototype_matchAll_next(txMachine* the)
 			done->value.boolean = 0;
 			complete->value.boolean = 1;
 		}
+		mxPop();
 	}
 	mxResult->kind = result->kind;
 	mxResult->value = result->value;
@@ -749,6 +789,7 @@ void fx_RegExp_prototype_replace(txMachine* the)
 	txSlot* function = C_NULL;;
 	txSlot* replacement = C_NULL;;
 	txBoolean globalFlag;
+	txBoolean unicodeFlag = 0;
 	txSlot* list;
 	txSlot* item;
 	txSize size; 
@@ -782,7 +823,7 @@ void fx_RegExp_prototype_replace(txMachine* the)
 	if (globalFlag) {
 		mxPushSlot(mxThis);
 		mxGetID(mxID(_unicode));
-		mxPop();
+		unicodeFlag = fxToBoolean(the, the->stack++);
 		
 		mxPushInteger(0);
 		mxPushSlot(mxThis);
@@ -865,6 +906,8 @@ void fx_RegExp_prototype_replace(txMachine* the)
                 the->stack += 1 + i;			
             }
             former = position + matchLength;
+            
+            mxPop(); // matched
         }
         else
             matchLength = 0;
@@ -875,8 +918,8 @@ void fx_RegExp_prototype_replace(txMachine* the)
 		if (0 == matchLength) {
 			mxPushSlot(mxThis);
 			mxGetID(mxID(_lastIndex));
-			fxToInteger(the, the->stack);
-			the->stack->value.integer++;
+			fxToLength(the, the->stack);
+			the->stack->value.number = fxAdvanceStringIndex(argument->value.string, the->stack->value.number, unicodeFlag);
 			mxPushSlot(mxThis);
 			mxSetID(mxID(_lastIndex));
 			mxPop();
@@ -962,6 +1005,7 @@ void fx_RegExp_prototype_split(txMachine* the)
 {
 #if mxRegExp
 	txSlot* argument;
+	txBoolean unicodeFlag = 0;
 	txIndex limit;
 	txSlot* splitter;
 	txSlot* array;
@@ -987,6 +1031,8 @@ void fx_RegExp_prototype_split(txMachine* the)
 	mxGetID(mxID(_flags));
 	if (!c_strchr(fxToString(the, the->stack), 'y'))
 		fxConcatStringC(the, the->stack, "y");
+	if (c_strchr(fxToString(the, the->stack), 'u'))
+		unicodeFlag = 1;
 	mxRunCount(2);
 	splitter = the->stack;
 	
@@ -1016,7 +1062,7 @@ void fx_RegExp_prototype_split(txMachine* the)
 		mxPop();
 		fxExecuteRegExp(the, splitter, argument);
 		if (the->stack->kind == XS_NULL_KIND) {
-			q++;
+			q = (txInteger)fxAdvanceStringIndex(argument->value.string, q, unicodeFlag);
 		}
 		else {
 			mxPushSlot(splitter);
@@ -1024,7 +1070,7 @@ void fx_RegExp_prototype_split(txMachine* the)
 			e = fxToInteger(the, the->stack);
 			mxPop();
 			if (e == p) {
-				q++;
+				q = (txInteger)fxAdvanceStringIndex(argument->value.string, q, unicodeFlag);
 			}
 			else {
 				txSlot* result = the->stack;

@@ -43,6 +43,7 @@
 	},
 	"preload": [
 		"piu/All",
+		"piu/Buttons",
 		"piu/PC",
 		"io/serial",
 		"timer",
@@ -51,7 +52,8 @@
 	],
 	"resources": {
 		"assets/*": "./assets/*",
-		"fonts/*": "./fonts/*"
+		"fonts/FiraMono-*": "$(MODDABLE)/examples/assets/scalablefonts/FiraMono/FiraMono-*",
+		"fonts/OpenSans-*": "$(MODDABLE)/examples/assets/scalablefonts/OpenSans/OpenSans-*"
 	},
 	"platforms":{
 		"x-lin": {
@@ -63,7 +65,7 @@
 					"$(PIU)/PC/lin/piu*"
 				],
 				"*": [
-					"$(MODDABLE)/modules/base/timer/timer",
+					"$(MODDABLE)/modules/base/timer/*",
 					"$(MODDABLE)/modules/base/timer/lin/*"
 				]
 			},

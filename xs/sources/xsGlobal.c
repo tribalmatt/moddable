@@ -157,10 +157,10 @@ void fxBuildGlobal(txMachine* the)
 	fxNewHostConstructor(the, mxCallback(fx_Enumerator), 0, XS_NO_ID);
 	mxPull(mxEnumeratorFunction);
 	
-	fxNewHostFunction(the, mxCallback(fxThrowTypeError), 0, XS_NO_ID);
+	fxNewHostFunction(the, mxCallback(fxThrowTypeError), 0, XS_NO_ID, XS_NO_ID);
 	mxThrowTypeErrorFunction = *the->stack;
 	slot = the->stack->value.reference;
-	slot->flag |= XS_CAN_CONSTRUCT_FLAG | XS_DONT_PATCH_FLAG;
+	slot->flag |= XS_DONT_PATCH_FLAG;
 	slot = slot->next;
 	while (slot) {
 		slot->flag |= XS_DONT_DELETE_FLAG | XS_DONT_SET_FLAG;
@@ -203,6 +203,16 @@ txSlot* fxCheckIteratorInstance(txMachine* the, txSlot* slot, txID id)
 	}
 	mxTypeError("this is no iterator");
 	return C_NULL;
+}
+
+txSlot* fxCheckIteratorResult(txMachine* the, txSlot* result) 
+{
+	txSlot* value = result->value.reference->next;
+	while (value && (value->flag & XS_INTERNAL_FLAG))
+		value = value->next;
+	mxCheck(the, (value != C_NULL) && (value->ID == mxID(_value)));
+	mxCheck(the, (value->next != C_NULL) && (value->next->ID == mxID(_done)));
+	return value;
 }
 
 txBoolean fxIteratorNext(txMachine* the, txSlot* iterator, txSlot* next, txSlot* value)
@@ -397,7 +407,7 @@ void fx_Enumerator_next(txMachine* the)
 txBoolean fxGlobalDeleteProperty(txMachine* the, txSlot* instance, txID id, txIndex index) 
 {
 	txBoolean result = fxOrdinaryDeleteProperty(the, instance, id, index);
-	if (id && (id < XS_INTRINSICS_COUNT) && result) {
+	if ((XS_SYMBOL_ID_COUNT <= id) && (id < XS_INTRINSICS_COUNT) && result) {
 		txSlot* globals = instance->next;
 		globals->value.table.address[id] = C_NULL;
 	}
@@ -407,7 +417,7 @@ txBoolean fxGlobalDeleteProperty(txMachine* the, txSlot* instance, txID id, txIn
 txSlot* fxGlobalGetProperty(txMachine* the, txSlot* instance, txID id, txIndex index, txFlag flag) 
 {
 	txSlot* result = C_NULL;
-	if (id && (id < XS_INTRINSICS_COUNT)) {
+	if ((XS_SYMBOL_ID_COUNT <= id) && (id < XS_INTRINSICS_COUNT)) {
 		txSlot* globals = instance->next;
 		result = globals->value.table.address[id];
 		if (!result) {
@@ -423,7 +433,7 @@ txSlot* fxGlobalGetProperty(txMachine* the, txSlot* instance, txID id, txIndex i
 txSlot* fxGlobalSetProperty(txMachine* the, txSlot* instance, txID id, txIndex index, txFlag flag) 
 {
 	txSlot* result = C_NULL;
-	if (id && (id < XS_INTRINSICS_COUNT)) {
+	if ((XS_SYMBOL_ID_COUNT <= id) && (id < XS_INTRINSICS_COUNT)) {
 		txSlot* globals = instance->next;
 		result = globals->value.table.address[id];
 		if (!result) {
@@ -489,7 +499,7 @@ void fx_escape(txMachine* the)
 	}
 	src = fxToString(the, mxArgv(0));
 	length = 0;
-	while (((src = fxUTF8Decode(src, &c))) && (c != C_EOF)) {
+	while (((src = mxStringByteDecode(src, &c))) && (c != C_EOF)) {
 		if ((c < 128) && c_read8(gxSet + (int)c))
 			length = fxAddChunkSizes(the, length, 1);
 		else if (c < 256)
@@ -508,7 +518,7 @@ void fx_escape(txMachine* the)
 	mxResult->kind = XS_STRING_KIND;
 	src = mxArgv(0)->value.string;
 	dst = mxResult->value.string;
-	while (((src = fxUTF8Decode(src, &c))) && (c != C_EOF)) {
+	while (((src = mxStringByteDecode(src, &c))) && (c != C_EOF)) {
 		if ((c < 128) && c_read8(gxSet + (int)c))
 			*dst++ = (char)c;
 		else if (c < 256) {
@@ -622,14 +632,14 @@ void fx_unescape(txMachine* the)
 			c = c_read8(src++);
 			if (c == 'u') {
 				if (fxParseUnicodeEscape(&src, &d, 0, '%'))
-					length += fxUTF8Length(d);
+					length += mxStringByteLength(d);
 				else
 					length += 2;
 			}
 			else {
 				src--;
 				if (fxParseHexEscape(&src, &d))
-					length += fxUTF8Length(d);
+					length += mxStringByteLength(d);
 				else
 					length += 1;
 			}
@@ -653,7 +663,7 @@ void fx_unescape(txMachine* the)
 			d = 0;
 			if (c == 'u') {
 				if (fxParseUnicodeEscape(&src, &d, 0, '%'))
-					dst = fxUTF8Encode(dst, d);
+					dst = mxStringByteEncode(dst, d);
 				else {
 					*dst++ = '%';
 					*dst++ = 'u';
@@ -662,7 +672,7 @@ void fx_unescape(txMachine* the)
 			else {
 				src--;
 				if (fxParseHexEscape(&src, &d))
-					dst = fxUTF8Encode(dst, d);
+					dst = mxStringByteEncode(dst, d);
 				else
 					*dst++ = '%';
 			}
@@ -710,7 +720,7 @@ void fxDecodeURI(txMachine* the, txString theSet)
 					size--;
 				}
 				d &= sequence->lmask;
-				length += fxUTF8Length(d);
+				length += mxStringByteLength(d);
 			}
 		}
 		else
@@ -747,7 +757,7 @@ void fxDecodeURI(txMachine* the, txString theSet)
 					size--;
 				}
 				d &= sequence->lmask;
-				dst = fxUTF8Encode(dst, d);
+				dst = mxStringByteEncode(dst, d);
 			}
 		}
 		else
@@ -765,7 +775,7 @@ void fxEncodeURI(txMachine* the, txString theSet)
 
 	src = fxToString(the, mxArgv(0));
 	length = 0;
-	while (((src = fxUTF8Decode(src, &c))) && (c != C_EOF)) {
+	while (((src = mxStringByteDecode(src, &c))) && (c != C_EOF)) {
 		if (c < 0x80) {
 			if (c_read8(theSet + c))
 				length += 1;
@@ -791,7 +801,7 @@ void fxEncodeURI(txMachine* the, txString theSet)
 	mxResult->kind = XS_STRING_KIND;
 	src = mxArgv(0)->value.string;
 	dst = mxResult->value.string;
-	while (((src = fxUTF8Decode(src, &c))) && (c != C_EOF)) {
+	while (((src = mxStringByteDecode(src, &c))) && (c != C_EOF)) {
 		if (c < 0x80) {
 			if (c_read8(theSet + c))
 				*dst++ = (char)c;

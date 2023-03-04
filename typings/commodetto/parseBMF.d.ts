@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020 Moddable Tech, Inc.
+* Copyright (c) 2020-2022 Moddable Tech, Inc.
 *
 *   This file is part of the Moddable SDK Tools.
 *
@@ -18,16 +18,17 @@
 *
 */
 
-// this ignores option to pass ArrayBuffer
-
 declare module "commodetto/parseBMF" {
+  import Bitmap from "commodetto/Bitmap"
+
   type Font = {
     readonly byteLength: number
     height: number
     ascent: number
     position: number
-    charCount: number
+    charCount: number,
+    bitmap: Bitmap
   }
     
-  export default function(bmp: HostBuffer): Font
+  export default function (bmp: BufferLike): Font
 }

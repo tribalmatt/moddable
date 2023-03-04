@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2021  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022  Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -37,30 +37,31 @@
 
 import {Socket} from "socket";
 import Session from "ssl/session";
-import TLSError from "ssl/error";
 
 class SecureSocket {
 	constructor(dict) {
-		const sock = dict.sock ? dict.sock : new Socket(dict);
+		const sock = dict.sock ?? new Socket(dict);
 
 		this.sock = sock;
 		this.handshaking = true;
-		if (dict.secure && ("boolean" !== typeof dict.secure))
-			dict = Object.assign({tls_server_name: dict.host}, dict.secure);
-		else
-			dict = {tls_server_name: dict.host};
-		this.ssl = new Session(dict);
+		try {
+			this.ssl = new Session({tls_server_name: dict.host, ...dict.secure});
+		}
+		catch (e) {
+			sock.close();
+			throw e;
+		}
 		sock.callback = (message, value) => {
 			if (this.closing)
 				return;
 
 			try {
 				switch (message) {
-					case 1:		// connect
+					case Socket.connected:
 						this.ssl.initiateHandshake(this.sock);
 						this.messageHandler(0);
 						break;
-					case 2:		// receive
+					case Socket.readable:
 						do {
 							this.messageHandler(value);
 							if (this.closing)
@@ -69,35 +70,29 @@ class SecureSocket {
 						} while (value && !this.closing);
 						this.messageHandler(0);
 						break;
-					case 3:		// sent
+					case Socket.writable:
 						if (this.handshaking)
 							this.messageHandler(0);
 						else {
-							if (value > 128)			//@@ 128 is guess at TLS overhead
+							if (value > 128)			//@@ 128 is an estimate of TLS overhead
 								this.callback(3, value - 128)
 						}
 						break;
-					case -1:	// disconnect
-						this.closing = true;
-						break;
 					default:
-						trace(`secure socket error ${message}\n`);
-						this.error = true;
+						this.closing = message;
 						break;
 				}
 			}
 			catch (e) {
-				this.callback(-2, e);
-				this.close();
-				return;
+				this.closing = Socket.error;
 			}
 
 			if (this.closing) {
-				this.callback(-1);
+				this.callback(this.closing);
 				this.close();
 			}
 		}
-	};
+	}
 	read() @ "xs_securesocket_read";
 	write() @ "xs_securesocket_write";
 	close() {
@@ -110,7 +105,7 @@ class SecureSocket {
 	messageHandler(bytesAvailable) {
 		if (this.handshaking) {
 			if (this.ssl.handshake(this.sock, bytesAvailable)) {
-				this.handshaking = false;
+				delete this.handshaking;
 				this.callback(1);
 			}
 			return;
@@ -119,32 +114,26 @@ class SecureSocket {
 		if (bytesAvailable <= 0)
 			return;
 
-		try {
-			if (0 == this.ssl.bytesAvailable) {
-				// decode a packet to get how many bytes available in plain
-				if (!this.ssl.read(this.sock))
-					return;
-			}
-
-			while (!this.closing) {
-				bytesAvailable = this.ssl.bytesAvailable;
-				if (bytesAvailable <= 0)
-					break;
-				if (bytesAvailable > 1024)
-					bytesAvailable = 1024;
-
-				this.data = this.ssl.read(this.sock, bytesAvailable);	// returns Uint8Array
-				this.data.position = this.data.byteOffset;
-				this.data.end = this.data.position + this.data.byteLength;
-				this.callback(2, this.data.byteLength);
-			}
+		if (0 == this.ssl.bytesAvailable) {
+			// decode a packet to get how many bytes available in plain
+			if (!this.ssl.read(this.sock))
+				return;
 		}
-		catch (e) {
-			this.error = true;
+
+		while (!this.closing) {
+			bytesAvailable = this.ssl.bytesAvailable;
+			if (bytesAvailable <= 0)
+				break;
+			if (bytesAvailable > 1024)
+				bytesAvailable = 1024;
+
+			this.data = this.ssl.read(this.sock, bytesAvailable);	// returns Uint8Array
+			this.data.position = this.data.byteOffset;
+			this.data.end = this.data.position + this.data.byteLength;
+			this.callback(2, this.data.byteLength);
 		}
 		delete this.data;
-	};
-};
-Object.freeze(SecureSocket.prototype);
+	}
+}
 
 export default SecureSocket;

@@ -74,9 +74,9 @@ struct sxKeyword {
 struct sxSymbol {
 	txSymbol* next;
 	txID ID;
-	txInteger length;
+	txSize length;
 	txString string;
-	txSize sum;
+	txU4 sum;
 	txInteger usage;
 };
 
@@ -612,7 +612,9 @@ struct sxParser {
 	int ahead;
 	txU4 character;
 	txU4 lookahead;
-
+#if mxCESU8
+	txU4 surrogate;
+#endif
 	int line;
 	int crlf;
 	int escaped;
@@ -1043,6 +1045,7 @@ extern void fxPostfixExpressionNodeBind(void* it, void* param);
 extern void fxPrivateMemberNodeBind(void* it, void* param);
 extern void fxProgramNodeBind(void* it, void* param); 
 extern void fxProgramNodeHoist(void* it, void* param); 
+extern void fxPropertyNodeHoist(void* it, void* param);
 extern void fxSpreadNodeBind(void* it, void* param);
 extern void fxStatementNodeHoist(void* it, void* param);
 extern void fxStringNodeHoist(void* it, void* param);
@@ -1137,6 +1140,7 @@ extern void fxOrExpressionNodeCode(void* it, void* param);
 extern void fxParamsNodeCode(void* it, void* param);
 extern void fxParamsBindingNodeCode(void* it, void* param); 
 extern void fxPostfixExpressionNodeCode(void* it, void* param); 
+extern void fxPrivateIdentifierNodeCode(void* it, void* param); 
 extern void fxPrivateMemberNodeCode(void* it, void* param); 
 extern void fxPrivateMemberNodeCodeAssign(void* it, void* param, txFlag flag); 
 extern void fxPrivateMemberNodeCodeDelete(void* it, void* param);

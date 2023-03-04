@@ -18,6 +18,7 @@
  *
  */
 
+#define GDIPVER     0x0110
 #include "piuPC.h"
 #include "screen.h"
 
@@ -38,14 +39,14 @@ struct PiuScreenStruct {
 	HWND control;
     txScreen* screen;
     Bitmap* bitmap;
-//     HDC dc;
-//     HBITMAP bitmap;
-//     BITMAPINFO* bitmapInfo;
+	ColorMatrix* colorMatrix;
+	ImageAttributes* imageAttributes;
 	HMODULE library;
 	HANDLE archiveFile;
 	HANDLE archiveMapping;
 	PiuRectangleRecord hole;
 	xsIntegerValue rotation;
+	xsNumberValue transparency;
 };
 
 struct PiuScreenMessageStruct {
@@ -126,7 +127,18 @@ LRESULT CALLBACK PiuScreenControlProc(HWND window, UINT message, WPARAM wParam, 
 		graphics.TranslateTransform(((REAL)(*self)->bounds.width)/2.0, ((REAL)(*self)->bounds.height)/2.0);
 		graphics.RotateTransform((REAL)(*self)->rotation);
 		graphics.TranslateTransform(-((REAL)screen->width)/2.0, -((REAL)screen->height)/2.0);
-  		graphics.DrawImage((*self)->bitmap, PointF(0.0f, 0.0f));
+		if ((*self)->transparency) {
+			RectF bounds(0, 0, screen->width, screen->height);
+			(*self)->colorMatrix->m[0][0] = 1;
+			(*self)->colorMatrix->m[1][1] = 1;
+			(*self)->colorMatrix->m[2][2] = 1;
+			(*self)->colorMatrix->m[3][3] = 1 - (REAL)((*self)->transparency);
+			(*self)->colorMatrix->m[4][4] = 1;
+			(*self)->imageAttributes->SetColorMatrix((*self)->colorMatrix);
+			graphics.DrawImage((*self)->bitmap, bounds, bounds, UnitPixel, (*self)->imageAttributes);
+		}
+		else
+  			graphics.DrawImage((*self)->bitmap, PointF(0.0f, 0.0f));
 		EndPaint(window, &ps);
 		return TRUE;
 	} break;
@@ -261,6 +273,8 @@ void PiuScreenBind(void* it, PiuApplication* application, PiuView* view)
     (*self)->screen = screen;
     
     (*self)->bitmap = new Bitmap(width, height, 4 * width, PixelFormat32bppRGB, screen->buffer);
+    (*self)->colorMatrix = new ColorMatrix();
+    (*self)->imageAttributes = new ImageAttributes();
     
 	(*self)->window = CreateWindowEx(0, "PiuClipWindow", NULL, WS_CHILD | WS_CLIPCHILDREN | WS_VISIBLE, 0, 0, 0, 0, (*view)->window, NULL, gInstance, (LPVOID)self);
 	(*self)->control = CreateWindowEx(0, "PiuScreenControl", NULL, WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, (*self)->window, NULL, gInstance, (LPVOID)self);
@@ -357,7 +371,16 @@ void PiuScreenQuit(PiuScreen* self)
 		(*self)->archiveFile = INVALID_HANDLE_VALUE;
 	}
 	if ((*self)->library) {
+		wchar_t path[MAX_PATH];
+		HANDLE file;
+		GetModuleFileNameW((*self)->library, path, 1024);
 		FreeLibrary((*self)->library);
+		file = CreateFileW(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		while (file == INVALID_HANDLE_VALUE) {
+			Sleep(1);
+			file = CreateFileW(path, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		}
+		CloseHandle(file);
 		(*self)->library = NULL;
 	}
 	InvalidateRect((*self)->control, NULL, FALSE);
@@ -372,6 +395,10 @@ void PiuScreenUnbind(void* it, PiuApplication* application, PiuView* view)
 	(*self)->control = NULL;
 	(*self)->window = NULL;
 	
+	delete (*self)->colorMatrix;
+	(*self)->colorMatrix = NULL;
+	delete (*self)->imageAttributes;
+	(*self)->imageAttributes = NULL;
 	delete (*self)->bitmap;
 	(*self)->bitmap = NULL;
 	mxDeleteMutex(&screen->workersMutex);
@@ -436,7 +463,20 @@ void PiuScreen_get_running(xsMachine* the)
 	PiuScreen* self = PIU(Screen, xsThis);
 	xsResult = (*self)->library ? xsTrue : xsFalse;
 }
-	
+		
+void PiuScreen_get_transparency(xsMachine* the)
+{
+	PiuScreen* self = PIU(Screen, xsThis);
+	xsResult = xsNumber((*self)->transparency);
+}
+
+void PiuScreen_set_transparency(xsMachine* the)
+{
+	PiuScreen* self = PIU(Screen, xsThis);
+	(*self)->transparency = xsToNumber(xsArg(0));
+	PiuContentInvalidate(self, NULL);
+}
+
 void PiuScreen_launch(xsMachine* the)
 {
 	PiuScreen* self = PIU(Screen, xsThis);
@@ -512,6 +552,62 @@ void PiuScreen_quit(xsMachine* the)
 {
 	PiuScreen* self = PIU(Screen, xsThis);
 	PiuScreenQuit(self);
+}
+
+static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid)
+{
+   UINT  num = 0;          // number of image encoders
+   UINT  size = 0;         // size of the image encoder array in bytes
+
+   ImageCodecInfo* pImageCodecInfo = NULL;
+
+   GetImageEncodersSize(&num, &size);
+   if(size == 0)
+      return -1;  // Failure
+
+   pImageCodecInfo = (ImageCodecInfo*)(malloc(size));
+   if(pImageCodecInfo == NULL)
+      return -1;  // Failure
+
+   GetImageEncoders(num, size, pImageCodecInfo);
+
+   for(UINT j = 0; j < num; ++j)
+   {
+      if( wcscmp(pImageCodecInfo[j].MimeType, format) == 0 )
+      {
+         *pClsid = pImageCodecInfo[j].Clsid;
+         free(pImageCodecInfo);
+         return j;  // Success
+      }    
+   }
+
+   free(pImageCodecInfo);
+   return -1;  // Failure
+}
+
+void PiuScreen_writePNG(xsMachine* the)
+{
+	PiuScreen* self = PIU(Screen, xsThis);
+	txScreen* screen = (*self)->screen;
+	wchar_t* path = NULL;
+	Bitmap* bitmap = NULL;
+	CLSID encoderClsid;
+	Status status;
+	xsTry {
+		path = xsToStringCopyW(xsArg(0));
+		bitmap = new Bitmap(screen->width, screen->height, 4 * screen->width, PixelFormat32bppRGB, screen->buffer);
+		GetEncoderClsid(L"image/png", &encoderClsid);
+  		status = bitmap->Save(path, &encoderClsid, NULL);
+		xsElseThrow(status == Ok);
+		delete bitmap;
+		free(path);
+	}
+	xsCatch {
+		if (bitmap != NULL)
+			delete bitmap;
+		if (path != NULL)
+			free(path);
+	}
 }
 
 void fxScreenAbort(txScreen* screen, int status)

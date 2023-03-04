@@ -147,6 +147,8 @@ const txString gxCodeNames[XS_CODE_COUNT] = {
 	/* XS_CODE_GET_THIS_VARIABLE */ "get_this_variable",
 	/* XS_CODE_GET_VARIABLE */ "get_variable",
 	/* XS_CODE_GLOBAL */ "global",
+	/* XS_CODE_HAS_PRIVATE_1 */ "has_private",
+	/* XS_CODE_HAS_PRIVATE_2 */ "has_private_2",
 	/* XS_CODE_HOST */ "host",
 	/* XS_CODE_IMPORT */ "import",
 	/* XS_CODE_IMPORT_META */ "import.meta",
@@ -275,7 +277,8 @@ const txString gxCodeNames[XS_CODE_COUNT] = {
 	/* XS_CODE_VOID */ "void",
 	/* XS_CODE_WITH */ "with",
 	/* XS_CODE_WITHOUT */ "without",
-	/* XS_CODE_YIELD */ "yield"
+	/* XS_CODE_YIELD */ "yield",
+	/* XS_CODE_PROFILE */ "profile"
 };
 
 const txS1 gxCodeSizes[XS_CODE_COUNT] ICACHE_FLASH_ATTR = {
@@ -384,6 +387,8 @@ const txS1 gxCodeSizes[XS_CODE_COUNT] ICACHE_FLASH_ATTR = {
 	0 /* XS_CODE_GET_THIS_VARIABLE */,
 	0 /* XS_CODE_GET_VARIABLE */,
 	1 /* XS_CODE_GLOBAL */,
+	2 /* XS_CODE_HAS_PRIVATE_1 */,
+	3 /* XS_CODE_HAS_PRIVATE_2 */,
 	3 /* XS_CODE_HOST */,
 	1 /* XS_CODE_IMPORT */,
 	1 /* XS_CODE_IMPORT_META */,
@@ -403,7 +408,7 @@ const txS1 gxCodeSizes[XS_CODE_COUNT] ICACHE_FLASH_ATTR = {
 	3 /* XS_CODE_LET_LOCAL_2 */,
 	3 /* XS_CODE_LINE */,
 	1 /* XS_CODE_MINUS */,
-	1 /* XS_CODE_MODULE */,
+	2 /* XS_CODE_MODULE */,
 	1 /* XS_CODE_MODULO */,
 	1 /* XS_CODE_MORE */,
 	1 /* XS_CODE_MORE_EQUAL */,
@@ -512,10 +517,23 @@ const txS1 gxCodeSizes[XS_CODE_COUNT] ICACHE_FLASH_ATTR = {
 	1 /* XS_CODE_VOID */,
 	1 /* XS_CODE_WITH */,
 	1 /* XS_CODE_WITHOUT */,
-	1 /* XS_CODE_YIELD */
+	1 /* XS_CODE_YIELD */,
+#ifdef mx32bitID
+	5 /* XS_CODE_PROFILE */
+#else
+	3 /* XS_CODE_PROFILE */
+#endif
 };
 
 #if mxUseDefaultCStackLimit
+
+#ifdef __ets__
+	#if ESP32
+		#include "freertos/task.h"
+	#else
+		#include "cont.h"
+	#endif
+#endif
 
 #ifndef mxASANStackMargin
 	#define mxASANStackMargin 0
@@ -531,17 +549,27 @@ char* fxCStackLimit()
 		pthread_t self = pthread_self();
     	void* stackAddr = pthread_get_stackaddr_np(self);
    		size_t stackSize = pthread_get_stacksize_np(self);
-		return (char*)stackAddr - stackSize + (16 * 1024) + mxASANStackMargin;
+		return (char*)stackAddr - stackSize + (128 * 1024) + mxASANStackMargin;
 	#elif mxLinux
+		char* result = C_NULL;
 		pthread_attr_t attrs;
+		pthread_attr_init(&attrs);
 		if (pthread_getattr_np(pthread_self(), &attrs) == 0) {
     		void* stackAddr;
    			size_t stackSize;
 			if (pthread_attr_getstack(&attrs, &stackAddr, &stackSize) == 0) {
-				return (char*)stackAddr + (16 * 1024) + mxASANStackMargin;
+				result = (char*)stackAddr + (128 * 1024) + mxASANStackMargin;
 			}
 		}
-		return C_NULL;
+		pthread_attr_destroy(&attrs);
+		return result;
+	#elif defined(__ets__) && !ESP32
+		extern cont_t g_cont;
+		return 192 + (char *)g_cont.stack;
+	#elif defined(__ets__) && ESP32
+		TaskStatus_t info;
+		vTaskGetTaskInfo(NULL, &info, pdFALSE, eReady);
+		return 512 + (char *)info.pxStackBase;
 	#else
 		return C_NULL;
 	#endif
@@ -571,36 +599,6 @@ const txUTF8Sequence gxUTF8Sequences[] ICACHE_RODATA_ATTR = {
 	{5, 0xFC, 0xF8, 4*6, 0x03FFFFFF, 0x00200000},
 	{6, 0xFE, 0xFC, 5*6, 0x7FFFFFFF, 0x04000000},
 	{0, 0, 0, 0, 0, 0},
-};
-
-/* compressed from http://www-01.ibm.com/support/knowledgecenter/#!/ssw_ibm_i_71/nls/rbagslowtoupmaptable.htm */
-const txCharCase gxCharCaseToLower[mxCharCaseToLowerCount] ICACHE_XS6RO_ATTR = {
-	{0x0041,0x005A,32},{0x00C0,0x00D6,32},{0x00D8,0x00DE,32},{0x0100,0x0136,0},{0x0139,0x0147,0},{0x014A,0x0176,0},{0x0178,0x0178,-121},
-	{0x0179,0x017D,0},{0x0181,0x0181,210},{0x0182,0x0184,0},{0x0186,0x0186,206},{0x0187,0x0187,0},{0x018A,0x018A,205},{0x018B,0x018B,0},
-	{0x018E,0x018F,202},{0x0190,0x0190,203},{0x0191,0x0191,0},{0x0193,0x0193,205},{0x0194,0x0194,207},{0x0196,0x0196,211},{0x0197,0x0197,209},
-	{0x0198,0x0198,0},{0x019C,0x019C,211},{0x019D,0x019D,213},{0x019F,0x019F,214},{0x01A0,0x01A4,0},{0x01A7,0x01A7,0},{0x01A9,0x01A9,218},
-	{0x01AC,0x01AC,0},{0x01AE,0x01AE,218},{0x01AF,0x01AF,0},{0x01B1,0x01B2,217},{0x01B3,0x01B5,0},{0x01B7,0x01B7,219},{0x01B8,0x01B8,0},
-	{0x01BC,0x01BC,0},{0x01C4,0x01C4,2},{0x01C7,0x01C7,2},{0x01CA,0x01CA,2},{0x01CD,0x01DB,0},{0x01DE,0x01EE,0},{0x01F1,0x01F1,2},
-	{0x01F4,0x01F4,0},{0x01FA,0x0216,0},{0x0386,0x0386,38},{0x0388,0x038A,37},{0x038C,0x038C,64},{0x038E,0x038F,63},{0x0391,0x03A1,32},
-	{0x03A3,0x03AB,32},{0x03E2,0x03EE,0},{0x0401,0x040C,80},{0x040E,0x040F,80},{0x0410,0x042F,32},{0x0460,0x0480,0},{0x0490,0x04BE,0},
-	{0x04C1,0x04C3,0},{0x04C7,0x04C7,0},{0x04CB,0x04CB,0},{0x04D0,0x04EA,0},{0x04EE,0x04F4,0},{0x04F8,0x04F8,0},{0x0531,0x0556,48},
-	{0x10A0,0x10C5,48},{0x1E00,0x1E94,0},{0x1EA0,0x1EF8,0},{0x1F08,0x1F0F,-8},{0x1F18,0x1F1D,-8},{0x1F28,0x1F2F,-8},{0x1F38,0x1F3F,-8},
-	{0x1F48,0x1F4D,-8},{0x1F59,0x1F59,-8},{0x1F5B,0x1F5B,-8},{0x1F5D,0x1F5D,-8},{0x1F5F,0x1F5F,-8},{0x1F68,0x1F6F,-8},{0x1F88,0x1F8F,-8},
-	{0x1F98,0x1F9F,-8},{0x1FA8,0x1FAF,-8},{0x1FB8,0x1FB9,-8},{0x1FD8,0x1FD9,-8},{0x1FE8,0x1FE9,-8},{0x24B6,0x24CF,26},{0xFF21,0xFF3A,32}
-};
-const txCharCase gxCharCaseToUpper[mxCharCaseToUpperCount] ICACHE_XS6RO_ATTR = {
-	{0x0061,0x007A,-32},{0x00E0,0x00F6,-32},{0x00F8,0x00FE,-32},{0x00FF,0x00FF,121},{0x0101,0x0137,0},{0x013A,0x0148,0},{0x014B,0x0177,0},
-	{0x017A,0x017E,0},{0x0183,0x0185,0},{0x0188,0x0188,0},{0x018C,0x018C,0},{0x0192,0x0192,0},{0x0199,0x0199,0},{0x01A1,0x01A5,0},
-	{0x01A8,0x01A8,0},{0x01AD,0x01AD,0},{0x01B0,0x01B0,0},{0x01B4,0x01B6,0},{0x01B9,0x01B9,0},{0x01BD,0x01BD,0},{0x01C6,0x01C6,-2},
-	{0x01C9,0x01C9,-2},{0x01CC,0x01CC,-2},{0x01CE,0x01DC,0},{0x01DF,0x01EF,0},{0x01F3,0x01F3,-2},{0x01F5,0x01F5,0},{0x01FB,0x0217,0},
-	{0x0253,0x0253,-210},{0x0254,0x0254,-206},{0x0257,0x0257,-205},{0x0258,0x0259,-202},{0x025B,0x025B,-203},{0x0260,0x0260,-205},{0x0263,0x0263,-207},
-	{0x0268,0x0268,-209},{0x0269,0x0269,-211},{0x026F,0x026F,-211},{0x0272,0x0272,-213},{0x0275,0x0275,-214},{0x0283,0x0283,-218},{0x0288,0x0288,-218},
-	{0x028A,0x028B,-217},{0x0292,0x0292,-219},{0x03AC,0x03AC,-38},{0x03AD,0x03AF,-37},{0x03B1,0x03C1,-32},{0x03C3,0x03CB,-32},{0x03CC,0x03CC,-64},
-	{0x03CD,0x03CE,-63},{0x03E3,0x03EF,0},{0x0430,0x044F,-32},{0x0451,0x045C,-80},{0x045E,0x045F,-80},{0x0461,0x0481,0},{0x0491,0x04BF,0},
-	{0x04C2,0x04C4,0},{0x04C8,0x04C8,0},{0x04CC,0x04CC,0},{0x04D1,0x04EB,0},{0x04EF,0x04F5,0},{0x04F9,0x04F9,0},{0x0561,0x0586,-48},
-	{0x10D0,0x10F5,-48},{0x1E01,0x1E95,0},{0x1EA1,0x1EF9,0},{0x1F00,0x1F07,8},{0x1F10,0x1F15,8},{0x1F20,0x1F27,8},{0x1F30,0x1F37,8},
-	{0x1F40,0x1F45,8},{0x1F51,0x1F51,8},{0x1F53,0x1F53,8},{0x1F55,0x1F55,8},{0x1F57,0x1F57,8},{0x1F60,0x1F67,8},{0x1F80,0x1F87,8},
-	{0x1F90,0x1F97,8},{0x1FA0,0x1FA7,8},{0x1FB0,0x1FB1,8},{0x1FD0,0x1FD1,8},{0x1FE0,0x1FE1,8},{0x24D0,0x24E9,-26},{0xFF41,0xFF5A,-32}
 };
 
 static const char gxHexLower[] ICACHE_FLASH_ATTR = "0123456789abcdef";
@@ -849,21 +847,19 @@ txBoolean fxParseUnicodeEscape(txString* string, txInteger* character, txInteger
 	if (c && (c == separator) && (0x0000D800 <= value) && (value <= 0x0000DBFF)) {
 		c = c_read8(p++);
 		if (c == 'u') {
-			txU4 surrogate = 0;
+			txU4 other = 0;
 			c = c_read8(p++);
-			if (!fxParseHex(c, &surrogate)) return 1;
+			if (!fxParseHex(c, &other)) return 1;
 			c = c_read8(p++);
-			if (!fxParseHex(c, &surrogate)) return 1;
+			if (!fxParseHex(c, &other)) return 1;
 			c = c_read8(p++);
-			if (!fxParseHex(c, &surrogate)) return 1;
+			if (!fxParseHex(c, &other)) return 1;
 			c = c_read8(p++);
-			if (!fxParseHex(c, &surrogate)) return 1;
-			if ((0x0000DC00 <= surrogate) && (surrogate <= 0x0000DFFF))
-				value = 0x00010000 + ((value & 0x03FF) << 10) + (surrogate & 0x03FF);
-			else
-				return 1;
-			*character = (txInteger)value;
-			*string = (txString)p;
+			if (!fxParseHex(c, &other)) return 1;
+			if ((0x0000DC00 <= other) && (other <= 0x0000DFFF)) {
+				*character = (txInteger)(0x00010000 + ((value & 0x03FF) << 10) + (other & 0x03FF));
+				*string = (txString)p;
+			}
 		}
 	}
 	return 1;
@@ -919,6 +915,27 @@ txString fxStringifyUnicodeEscape(txString string, txInteger character, txIntege
 	return (txString)p;
 }
 
+int fxUTF8Compare(txString p1, txString p2)
+{
+	register const unsigned char *s1 = (const unsigned char *) p1;
+	register const unsigned char *s2 = (const unsigned char *) p2;
+	unsigned char c1, c2;
+	do {
+		c1 = (unsigned char) *s1++;
+		c2 = (unsigned char) *s2++;
+		if (c1 == '\0')
+			return c1 - c2;
+	}
+	while (c1 == c2);
+	if (c2 == '\0')
+		return c1 - c2;
+	if ((c1 == 0xC0) && (*s1 == 0x80))
+		return 0 - c2;
+	if ((c2 == 0xC0) && (*s2 == 0x80))
+		return c1 - 0;
+	return c1 - c2;
+}
+
 txString fxUTF8Decode(txString string, txInteger* character)
 {
 	txU1* p = (txU1*)string;
@@ -937,8 +954,6 @@ txString fxUTF8Decode(txString string, txInteger* character)
 				c = (c << 6) | (c_read8(p++) & 0x3F);
 			}
 			c &= sequence->lmask;
-			if (c == 0x110000)
-				c = 0;
 		}
 		*character = (txInteger)c;
 		return (txString)p;
@@ -953,9 +968,7 @@ txString fxUTF8Encode(txString string, txInteger character)
 	if (character < 0) {
 	}
 	else if (character == 0) {
-		*p++ = 0xF4;
-		*p++ = 0x90;
-		*p++ = 0x80;
+		*p++ = 0xC0;
 		*p++ = 0x80;
 	}
 	else if (character < 0x80) {
@@ -985,7 +998,7 @@ txSize fxUTF8Length(txInteger character)
 	if (character < 0)
 		length = 0;
 	else if (character == 0)
-		length = 4;
+		length = 2;
 	else if (character < 0x80)
 		length = 1;
 	else if (character < 0x800)
@@ -998,6 +1011,81 @@ txSize fxUTF8Length(txInteger character)
 		length = 0;
 	return length;
 }
+
+#if mxCESU8
+txString fxCESU8Decode(txString string, txInteger* character)
+{
+	txInteger result;
+	string = fxUTF8Decode(string, &result);
+	if ((0x0000D800 <= result) && (result <= 0x0000DBFF)) {
+		txString former = string;
+		txInteger surrogate;
+		string = fxUTF8Decode(former, &surrogate);
+		if ((0x0000DC00 <= surrogate) && (surrogate <= 0x0000DFFF))
+			result = 0x00010000 + ((result & 0x000003FF) << 10) + (surrogate & 0x000003FF);
+		else
+			string = former;
+	}
+	*character = result;
+	return string;
+}
+
+txString fxCESU8Encode(txString string, txInteger character)
+{
+	txU1* p = (txU1*)string;
+	if (character < 0) {
+	}
+	else if (character == 0) {
+		*p++ = 0xC0;
+		*p++ = 0x80;
+	}
+	else if (character < 0x80) {
+		*p++ = (txU1)character;
+	}
+	else if (character < 0x800) {
+		*p++ = (txU1)(0xC0 | (((txU4)character) >> 6));
+		*p++ = (txU1)(0x80 | (((txU4)character) & 0x3F));
+	}
+	else if (character < 0x10000) {
+		*p++ = (txU1)(0xE0 | (((txU4)character) >> 12));
+		*p++ = (txU1)(0x80 | ((((txU4)character) >> 6) & 0x3F));
+		*p++ = (txU1)(0x80 | (((txU4)character) & 0x3F));
+	}
+	else if (character < 0x110000) {
+		txInteger surrogate;
+		character -= 0x00010000;
+		surrogate = 0xDC00 | (character & 0x3FF);
+		character = 0xD800 | ((character >> 10) & 0x3FF);
+		*p++ = (txU1)(0xE0 | (((txU4)character) >> 12));
+		*p++ = (txU1)(0x80 | ((((txU4)character) >> 6) & 0x3F));
+		*p++ = (txU1)(0x80 | (((txU4)character) & 0x3F));
+		*p++ = (txU1)(0xE0 | (((txU4)surrogate) >> 12));
+		*p++ = (txU1)(0x80 | ((((txU4)surrogate) >> 6) & 0x3F));
+		*p++ = (txU1)(0x80 | (((txU4)surrogate) & 0x3F));
+	}
+	return (txString)p;
+}
+
+txSize fxCESU8Length(txInteger character)
+{
+	txSize length;
+	if (character < 0)
+		length = 0;
+	else if (character == 0)
+		length = 2;
+	else if (character < 0x80)
+		length = 1;
+	else if (character < 0x800)
+		length = 2;
+	else if (character < 0x10000)
+		length = 3;
+	else if (character < 0x110000)
+		length = 6;
+	else
+		length = 0;
+	return length;
+}
+#endif
 
 txSize fxUTF8ToUnicodeOffset(txString theString, txSize theOffset)
 {
@@ -1038,6 +1126,11 @@ txSize fxUnicodeLength(txString theString)
 
 #define ONEMASK ((size_t)(-1) / 0xFF)
 
+#if defined(__has_feature)
+	#if __has_feature(address_sanitizer)
+		__attribute__((no_sanitize("address"))) 
+	#endif
+#endif
 txSize fxUnicodeLength(txString _s)
 {
 	const char * s;
@@ -1086,8 +1179,8 @@ txSize fxUnicodeLength(txString _s)
 done:
 	return (txSize)((s - _s) - count);
 }
-
 #endif
+
 txSize fxUnicodeToUTF8Offset(txString theString, txSize theOffset)
 {
 	txU1* p = (txU1*)theString;
@@ -1188,6 +1281,7 @@ const txString gxIDStrings[XS_ID_COUNT] = {
 	"JSON",
 	"Map",
 	"Math",
+	"ModuleSource",
 	"Number",
 	"Object",
 	"Promise",
@@ -1198,7 +1292,6 @@ const txString gxIDStrings[XS_ID_COUNT] = {
 	"RegExp",
 	"Set",
 	"SharedArrayBuffer",
-	"StaticModuleRecord",
 	"String",
 	"Symbol",
 	"SyntaxError",
@@ -1293,6 +1386,7 @@ const txString gxIDStrings[XS_ID_COUNT] = {
 	"callee",
 	"caller",
 	"catch",
+	"cause",
 	"cbrt",
 	"ceil",
 	"center",
@@ -1409,6 +1503,7 @@ const txString gxIDStrings[XS_ID_COUNT] = {
 	"has",
 	"hasIndices",
 	"hasInstance",
+	"hasOwn",
 	"hasOwnProperty",
 	"hypot",
 	"id",
@@ -1466,6 +1561,8 @@ const txString gxIDStrings[XS_ID_COUNT] = {
 	"module",
 	"multiline",
 	"name",
+	"needsImport",
+	"needsImportMeta",
 	"new.target",
 	"next",
 	"normalize",

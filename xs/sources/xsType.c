@@ -111,7 +111,25 @@ txSlot* fxDuplicateInstance(txMachine* the, txSlot* instance)
 	from = instance->next;
 	to = result;
 	while (from) {
-		to = to->next = fxDuplicateSlot(the, from);
+		if (from->kind != XS_WEAK_ENTRY_KIND) {
+			to = to->next = fxDuplicateSlot(the, from);
+			if (from->kind == XS_ARRAY_KIND) {
+				txSlot* address = from->value.array.address;
+				to->value.array.address = C_NULL;
+				if (address) {
+					txSize size = (((txChunk*)(((txByte*)address) - sizeof(txChunk)))->size) / sizeof(txSlot);
+					txSlot* chunk = (txSlot*)fxNewChunk(the, size * sizeof(txSlot));
+					address = from->value.array.address;
+					c_memcpy(chunk, address, size * sizeof(txSlot));
+					to->value.array.address = chunk;
+					while (size) {
+						chunk->flag &= ~XS_MARK_FLAG;
+						chunk++;
+						size--;
+					}
+				}
+			}
+		}
 		from = from->next;
 	}
 	return result;
@@ -231,13 +249,8 @@ txSlot* fxToInstance(txMachine* the, txSlot* theSlot)
 		break;
 #ifdef mxHostFunctionPrimitive
 	case XS_HOST_FUNCTION_KIND: {
-		txByte* code = the->code;
-		the->code = (txByte*)(theSlot->value.hostFunction.IDs);
-		anInstance = fxNewHostFunction(the, theSlot->value.hostFunction.builder->callback, theSlot->value.hostFunction.builder->length, 
-			(theSlot->value.hostFunction.IDs && (theSlot->value.hostFunction.builder->id)) 
-				? theSlot->value.hostFunction.IDs[theSlot->value.hostFunction.builder->id]
-				: theSlot->value.hostFunction.builder->id);
-		the->code = code;
+		const txHostFunctionBuilder* builder = theSlot->value.hostFunction.builder;
+		anInstance = fxNewHostFunction(the, builder->callback, builder->length, builder->id, theSlot->value.hostFunction.profileID);
 		mxPullSlot(theSlot);
 		} break;
 #endif
@@ -327,7 +340,7 @@ void fxOrdinaryCall(txMachine* the, txSlot* instance, txSlot* _this, txSlot* arg
 
 void fxOrdinaryConstruct(txMachine* the, txSlot* instance, txSlot* arguments, txSlot* target)
 {
-	txInteger c, i;
+    txIndex c, i;
 	/* THIS */
 	mxPushUninitialized();
 	/* FUNCTION */
@@ -343,7 +356,7 @@ void fxOrdinaryConstruct(txMachine* the, txSlot* instance, txSlot* arguments, tx
 	/* ARGUMENTS */
 	mxPushSlot(arguments);
 	mxGetID(mxID(_length));
-	c = fxToInteger(the, the->stack);
+    c = (txIndex)fxToLength(the, the->stack);
 	mxPop();
 	for (i = 0; i < c; i++) {
 		mxPushSlot(arguments);
@@ -541,7 +554,7 @@ again:
 				txID color = the->colors[id];
 				if (color) {
 					result = instance + color;
-					if (result->ID == id)
+					if ((result->ID == id) && (result->kind != XS_INSTANCE_KIND))
 						return result;
 				}
 			}
@@ -1133,6 +1146,8 @@ txSlot* fxNewEnvironmentInstance(txMachine* the, txSlot* environment)
 txBoolean fxEnvironmentDefineOwnProperty(txMachine* the, txSlot* instance, txID id, txIndex index, txSlot* slot, txFlag mask) 
 {
 	txSlot* property = fxOrdinarySetProperty(the, instance, id, index, XS_OWN);
+	if (!property)
+		return 0;
 	property->flag = slot->flag & mask;
 	property->kind = slot->kind;
 	property->value = slot->value;
@@ -1166,12 +1181,16 @@ txSlot* fxEnvironmentGetProperty(txMachine* the, txSlot* instance, txID id, txIn
 		txSlot* result = instance->next->next;
 		while (result) {
 			if (result->ID == id) {
-				result = result->value.closure;
-				alias = result->ID;
-				if (alias) {
-					txSlot* slot = the->aliasArray[alias];
-					if (slot)
-						result = slot;
+				if (result->kind == XS_CLOSURE_KIND) {
+					result = result->value.closure;
+					if (result) {
+						alias = result->ID;
+						if (alias) {
+							txSlot* slot = the->aliasArray[alias];
+							if (slot)
+								result = slot;
+						}	
+					}	
 				}	
 				return result;
 			}
@@ -1202,16 +1221,18 @@ txSlot* fxEnvironmentSetProperty(txMachine* the, txSlot* instance, txID id, txIn
 		txSlot* result = instance->next->next;
 		while (result) {
 			if (result->ID == id) {
-				result = result->value.closure;
-				if (result->flag & XS_DONT_SET_FLAG)
-					mxDebugID(XS_TYPE_ERROR, "set %s: const", id);
-				alias = result->ID;
-				if (alias) {
-					result = the->aliasArray[alias];
-					if (!result) {
-						result = fxNewSlot(the);
-						the->aliasArray[alias] = result;
-					}
+				if (result->kind == XS_CLOSURE_KIND) {
+					result = result->value.closure;
+					if (result->flag & XS_DONT_SET_FLAG)
+						mxDebugID(XS_TYPE_ERROR, "set %s: const", id);
+					alias = result->ID;
+					if (alias) {
+						result = the->aliasArray[alias];
+						if (!result) {
+							result = fxNewSlot(the);
+							the->aliasArray[alias] = result;
+						}
+					}	
 				}	
 				return result;
 			}
@@ -1408,15 +1429,16 @@ void fxRunProgramEnvironment(txMachine* the)
 
 txSlot* fxNewRealmInstance(txMachine* the)
 {
-	txSlot* parent = the->stack + 8;
-	txSlot* global = the->stack + 7;
-	txSlot* moduleMap = the->stack + 6;
-	txSlot* own = the->stack + 5;
-	txSlot* closures = the->stack + 4;
-	txSlot* resolveHook = the->stack + 3;
-	txSlot* moduleMapHook = the->stack + 2;
-	txSlot* loadHook = the->stack + 1;
-	txSlot* loadNowHook = the->stack;
+	txSlot* parent = the->stack + 9;
+	txSlot* global = the->stack + 8;
+	txSlot* moduleMap = the->stack + 7;
+	txSlot* own = the->stack + 6;
+	txSlot* closures = the->stack + 5;
+	txSlot* resolveHook = the->stack + 4;
+	txSlot* moduleMapHook = the->stack + 3;
+	txSlot* loadHook = the->stack + 2;
+	txSlot* loadNowHook = the->stack + 1;
+	txSlot* importMetaHook = the->stack;
 	txSlot* realm = fxNewInstance(the);
 	txSlot* slot;
 	/* mxRealmGlobal */
@@ -1438,6 +1460,8 @@ txSlot* fxNewRealmInstance(txMachine* the)
 	slot = fxNextSlotProperty(the, slot, loadHook, XS_NO_ID, XS_GET_ONLY);
 	/* mxLoadNowHook */
 	slot = fxNextSlotProperty(the, slot, loadNowHook, XS_NO_ID, XS_GET_ONLY);
+	/* mxImportMetaHook */
+	slot = fxNextSlotProperty(the, slot, importMetaHook, XS_NO_ID, XS_GET_ONLY);
 	/* mxRealmParent */
 	slot = fxNextSlotProperty(the, slot, parent, XS_NO_ID, XS_GET_ONLY);
     parent->value.reference = realm;

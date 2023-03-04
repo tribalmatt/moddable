@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2021  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022  Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -22,13 +22,13 @@
 	websocket client and server
 
 	- validate Sec-WebSocket-Accept in client
-	- messages with characters with ascii values above 255 will fail
 */
 
 import {Socket, Listener} from "socket";
 import Base64 from "base64";
 import Logical from "logical";
 import {Digest} from "crypt";
+import Timer from "timer";
 
 /*
 	state:
@@ -56,6 +56,7 @@ export class Client {
 		this.headers = dictionary.headers ?? [];
 		this.protocol = dictionary.protocol;
 		this.state = 0;
+		this.flags = 0;
 
 		if (dictionary.socket)
 			this.socket = dictionary.socket;
@@ -104,6 +105,11 @@ export class Client {
 	close() {
 		this.socket?.close();
 		delete this.socket;
+
+		Timer.clear(this.timer);
+		delete this.timer;
+		
+		this.state = 4;
 	}
 };
 
@@ -115,6 +121,8 @@ function callback(message, value) {
 			throw new Error("socket connected but ws not in connecting state");
 
 		this.callback(Client.connect);		// connected socket
+		if (4 === this.state)
+			return;
 
 		let key = new Uint8Array(16);
 		for (let i = 0; i < 16; i++)
@@ -156,15 +164,19 @@ function callback(message, value) {
 	}
 
 	if (2 == message) {		// data available to read
-		if (1 == this.state) {
+		if (1 === this.state) {
 			let line = socket.read(String, "\n");
-			if ("HTTP/1.1 101" !== line.substring(0,12))
-				throw new Error("web socket upgrade failed");
+			if ("HTTP/1.1 101" !== line.substring(0,12)) {
+				trace("web socket upgrade failed\n");
+				this.callback(Client.disconnect);
+				this.close();
+				return;
+			}
 			this.state = 2;
 			this.line = undefined;
 			this.flags = 0;
 		}
-		if (2 == this.state) {
+		if (2 === this.state) {
 			while (true) {
 				let line = socket.read(String, "\n");
 				if (!line)
@@ -184,6 +196,8 @@ trace("partial header!!\n");		//@@ untested
 				if ("\r\n" == line) {							// empty line is end of headers
 					if (7 == this.flags) {
 						this.callback(Client.handshake);		// websocket handshake complete
+						if (4 === this.state)
+							return;
 						this.state = 3;							// ready to receive
 						value = socket.read();
 					}
@@ -216,7 +230,7 @@ trace("partial header!!\n");		//@@ untested
 				}
 			}
 		}
-		if (3 == this.state) {		// receive message
+		if (3 === this.state) {		// receive message
 			while (value) {
 				let tag = socket.read(Number);
 				let length = socket.read(Number);
@@ -287,22 +301,37 @@ trace("partial header!!\n");		//@@ untested
 export class Server {
 	#listener;
 	constructor(dictionary = {}) {
+		if (null === dictionary.port)
+			return;
+
 		this.#listener = new Listener({port: dictionary.port ?? 80});
 		this.#listener.callback = () => {
-			const socket = new Socket({listener: this.#listener});
-			const request = new Client({socket});
-			request.doMask = false;
-			socket.callback = server.bind(request);
-			request.state = 1;		// already connected socket
-			request.callback = this.callback;		// transfer server.callback to request.callback
+			const request = addClient(new Socket({listener: this.#listener}), 1, this.callback);
 			request.callback(Server.connect, this);	// tell app we have a new connection
 		};
 	}
 	close() {
-		this.#listener.close();
+		this.#listener?.close();
 		this.#listener = undefined;
 	}
+	attach(socket) {
+		const request = addClient(socket, 2, this.callback);
+		request.timer = Timer.set(() => {
+			delete request.timer;
+			request.callback(Server.connect, this);	// tell app we have a new connection
+			socket.callback(2, socket.read());
+		});
+	}
 };
+
+function addClient(socket, state, callback) {
+	const request = new Client({socket});
+	delete request.doMask;
+	socket.callback = server.bind(request);
+	request.state = state;
+	request.callback = callback;		// transfer server.callback to request.callback
+	return request;
+}
 
 /*
 	callback for server handshake. after that, switches to client callback
@@ -314,7 +343,7 @@ function server(message, value, etc) {
 	if (!socket) return;
 
 	if (2 == message) {
-		if ((1 == this.state) || (2 == this.state)) {
+		if ((1 === this.state) || (2 === this.state)) {
 			while (true) {
 				let line = socket.read(String, "\n");
 				if (!line)
@@ -368,7 +397,7 @@ trace("partial header!!\n");		//@@ untested
 					return;
 				}
 
-				if (1 == this.state) {
+				if (1 === this.state) {
 					// parse status line: GET / HTTP/1.1
 					line = line.split(" ");
 					if (line.length < 3)
@@ -381,7 +410,7 @@ trace("partial header!!\n");		//@@ untested
 					this.state = 2;
 					this.flags = 0;
 				}
-				else if (2 == this.state) {
+				else if (2 === this.state) {
 					let position = line.indexOf(":");
 					let name = line.substring(0, position).trim().toLowerCase();
 					let data = line.substring(position + 1).trim();

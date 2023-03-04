@@ -89,7 +89,8 @@ int main(int argc, char* argv[])
 		4 * 1024 * 1024, 	/* initialHeapCount */
 		1 * 1024 * 1024,	/* incrementalHeapCount */
 		1024 * 16,			/* stackCount */
-		2048 * 4,			/* keyCount */
+		2048 * 4,			/* initialKeyCount */
+		0,					/* incrementalKeyCount */
 		1993,				/* nameModulo */
 		127,				/* symbolModulo */
 		32 * 1024,			/* parserBufferSize */
@@ -168,13 +169,14 @@ int main(int argc, char* argv[])
 				argi++;
 				if (argi >= argc)
 					fxReportLinkerError(linker, "-c: no creation");
-				sscanf(argv[argi], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s", 
+				sscanf(argv[argi], "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%s", 
 					&linker->creation.initialChunkSize,
 					&linker->creation.incrementalChunkSize,
 					&linker->creation.initialHeapCount,
 					&linker->creation.incrementalHeapCount,
 					&linker->creation.stackCount,
-					&linker->creation.keyCount,
+					&linker->creation.initialKeyCount,
+					&linker->creation.incrementalKeyCount,
 					&linker->creation.nameModulo,
 					&linker->creation.symbolModulo,
 					&linker->creation.parserBufferSize,
@@ -187,7 +189,8 @@ int main(int argc, char* argv[])
 				argi++;
 				if (argi >= argc)
 					fxReportLinkerError(linker, "-n: no namespace");
-				linker->name = fxNewLinkerString(linker, argv[argi], mxStringLength(argv[argi]));
+				linker->nameSize = mxStringLength(argv[argi]) + 1;
+				linker->name = fxNewLinkerString(linker, argv[argi], linker->nameSize - 1);
 			}
 			else if (!c_strcmp(argv[argi], "-o")) {
 				argi++;
@@ -258,8 +261,10 @@ int main(int argc, char* argv[])
 			output = fxRealDirectoryPath(linker, ".");
 		if (!base)
 			base = output;
-		if (!linker->name)
-			linker->name = fxNewLinkerString(linker, name, mxStringLength(name));
+		if (!linker->name) {
+			linker->nameSize = mxStringLength(name) + 1;
+			linker->name = fxNewLinkerString(linker, name, linker->nameSize - 1);
+		}
 
 		linker->freezeFlag = (linker->stripFlag || linker->firstPreload) ? 1 : 0;
 			
@@ -301,6 +306,7 @@ int main(int argc, char* argv[])
 				script = script->nextScript;
 			}
 			fxBufferSymbols(linker);
+			fxBufferMaps(linker);
 			
 			c_strcpy(path, output);
 			c_strcat(path, name);
@@ -308,6 +314,8 @@ int main(int argc, char* argv[])
 			fxWriteArchive(linker, path, &file);
 		}
 		else {
+			linker->profileID = mxBaseProfileID;
+		
 			c_strcpy(path, base);
 			c_strcat(path, name);
 			c_strcat(path, ".xsi");
@@ -329,13 +337,13 @@ int main(int argc, char* argv[])
 			}
 			fxBufferSymbols(linker);
 			fxWriteSymbols(linker, path, &file);
-	
+			
 			linker->base = url;
 			linker->baseLength = mxStringLength(url);
-	
+
 			creation->nameModulo = linker->creation.nameModulo;
 			creation->symbolModulo = linker->creation.symbolModulo;
-			the = xsCreateMachine(creation, "xsl", linker);
+			the = fxCreateMachine(creation, "xsl", linker, linker->profileID);
 			mxThrowElse(the);
 			fxNewLinkerCallback(the, fx_Function_prototype_bound, "fx_Function_prototype_bound");
 				
@@ -368,6 +376,9 @@ int main(int argc, char* argv[])
 						}
 					}
 					xsCatch {
+						xsSlot errorStack = xsGet(xsException, mxID(_stack));
+						xsStringValue stackStr = xsToString(errorStack);
+						fprintf(stderr, "%s\n", stackStr);
 						xsStringValue message = xsToString(xsException);
 						fxReportLinkerError(linker, "%s", message);
 					}
@@ -398,9 +409,11 @@ int main(int argc, char* argv[])
 
 					fxDuplicateInstance(the, mxDateConstructor.value.reference);
 					callback = mxCallback(fx_Date_secure);
-					fxNewLinkerBuilder(linker, callback, 7, mxID(_Date));
 					property = mxFunctionInstanceCode(the->stack->value.reference);
 					property->value.callback.address = callback;
+					property = mxFunctionInstanceHome(the->stack->value.reference);
+					property->ID = fxGenerateProfileID(the);
+					fxNewLinkerBuilder(linker, callback, 7, mxID(_Date));
 		
 					property = mxBehaviorGetProperty(the, the->stack->value.reference, mxID(_now), 0, XS_OWN);
 					fxSetHostFunctionProperty(the, property, mxCallback(fx_Date_now_secure), 0, mxID(_now));
@@ -475,6 +488,7 @@ int main(int argc, char* argv[])
 				fxPrepareProjection(the);
 		
 			linker->bigintSize = 0;
+			linker->regexpSize = 0;
 			linker->slotSize = 0;
 			count = fxPrepareHeap(the);
 			if (linker->freezeFlag) {
@@ -543,6 +557,12 @@ int main(int argc, char* argv[])
 				fprintf(file, "static const txU4 gxBigIntData[mxBigIntCount];\n");
 				linker->bigintData = fxNewLinkerChunk(linker, linker->bigintSize * sizeof(txU4));
 				linker->bigintSize = 0;
+			}
+			if (linker->regexpSize) {
+				fprintf(file, "#define mxRegExpCount %d\n", (int)linker->regexpSize);
+				fprintf(file, "static const txInteger gxRegExpData[mxRegExpCount];\n");
+				linker->regexpData = fxNewLinkerChunk(linker, linker->regexpSize * sizeof(txU4));
+				linker->regexpSize = 0;
 			}
 			if (linker->slotSize) {
 				fprintf(file, "#define mxSlotCount %d\n", (int)linker->slotSize);
@@ -614,6 +634,19 @@ int main(int argc, char* argv[])
 				}
 				fprintf(file, "\n};\n\n");
 			}
+			if (linker->regexpSize) {
+				count = 0;
+				fprintf(file, "static const txInteger gxRegExpData[mxRegExpCount] = {");
+				while (count < linker->regexpSize) {
+					if (count % 8)
+						fprintf(file, " ");
+					else
+						fprintf(file, "\n\t");
+					fprintf(file, "0x%8.8X,", linker->regexpData[count]);
+					count++;
+				}
+				fprintf(file, "\n};\n\n");
+			}
 			if (linker->slotSize) {
 				fprintf(file, "static const txSlot* const gxSlotData[mxSlotCount] ICACHE_FLASH1_ATTR = {\n");
 				fxPrintTable(the, file, linker->slotSize, linker->slotData);
@@ -660,13 +693,15 @@ int main(int argc, char* argv[])
 			fprintf(file, "\t(txSlot**)gxSymbols,\n");
 			fprintf(file, "\tmxScriptsCount,\n");
 			fprintf(file, "\t(txScript*)gxScripts,\n");
-			fprintf(file, "\t{ %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d },\n",
+			fprintf(file, "\t%d,\n", the->profileID);
+			fprintf(file, "\t{ %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d },\n",
 				linker->creation.initialChunkSize,
 				linker->creation.incrementalChunkSize,
 				linker->creation.initialHeapCount,
 				linker->creation.incrementalHeapCount,
 				linker->creation.stackCount,
-				linker->creation.keyCount,
+				linker->creation.initialKeyCount,
+				linker->creation.incrementalKeyCount,
 				linker->creation.nameModulo,
 				linker->creation.symbolModulo,
 				linker->creation.parserBufferSize,
@@ -739,7 +774,6 @@ txID fxFindModule(txMachine* the, txSlot* realm, txID moduleID, txSlot* slot)
 	char buffer[C_PATH_MAX];
 	char separator;
 	txInteger dot = 0;
-	txSlot *key;
 	txString slash;
 	txString path;
 	txID id;
@@ -777,6 +811,8 @@ txID fxFindModule(txMachine* the, txSlot* realm, txID moduleID, txSlot* slot)
 				return XS_NO_ID;
 		}
 		*slash = 0;
+		if ((c_strlen(buffer) + c_strlen(name + dot)) >= sizeof(buffer))
+			mxRangeError("path too long");
 		c_strcat(buffer, name + dot);
 	}
 	else

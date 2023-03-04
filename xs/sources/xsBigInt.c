@@ -162,6 +162,7 @@ void fx_BigInt_asIntN(txMachine* the)
 			result = fxBigInt_usub(the, C_NULL, bits, result);
 		if (index && fxBigInt_comp(result, fxBigInt_ulsl1(the, C_NULL, (txBigInt *)&gxBigIntOne, index - 1)) >= 0)
 			result = fxBigInt_sub(the, C_NULL, result, bits);
+		result = fxBigInt_fit(the, result);
 	}
 	mxResult->value.bigint = *result;
 	mxResult->kind = XS_BIGINT_KIND;
@@ -187,6 +188,7 @@ void fx_BigInt_asUintN(txMachine* the)
 		result = fxBigInt_uand(the, C_NULL, arg, mask);
 		if ((arg->sign) && !fxBigInt_iszero(result))
 			result = fxBigInt_usub(the, C_NULL, bits, result);
+		result = fxBigInt_fit(the, result);
 	}
 	mxResult->value.bigint = *result;
 	mxResult->kind = XS_BIGINT_KIND;
@@ -231,8 +233,9 @@ void fx_BigInt_fromArrayBuffer(txMachine* the)
     if (sign)
         length--;
 	if (length <= 0) {
-		mxResult->value.bigint = gxBigIntNaN;
-		mxResult->kind = XS_BIGINT_X_KIND;
+		mxSyntaxError("invalid ArrayBuffer instance");
+// 		mxResult->value.bigint = gxBigIntNaN;
+// 		mxResult->kind = XS_BIGINT_X_KIND;
 		return;
 	}
 	bigint = fxBigInt_alloc(the, howmany(length, sizeof(txU4)));
@@ -520,31 +523,31 @@ void fxBigIntParseX(txBigInt* bigint, txString p, txSize length)
 
 #ifdef mxRun
 
-void fxBigintToArrayBuffer(txMachine* the, txSlot* slot, txU4 minBytes, txBoolean sign, int endian)
+void fxBigintToArrayBuffer(txMachine* the, txSlot* slot, txU4 total, txBoolean sign, int endian)
 {
 	txBigInt* bigint = fxToBigInt(the, slot, 1);
 	txU4 length = howmany(fxBigInt_bitsize(bigint), 8);
-	int prepend = 0;
+	txU4 offset = 0;
 	txU1 *src, *dst;
 	if (length == 0)
 		length = 1;
-	prepend = minBytes - length;
-	if (length < minBytes)
-		length = minBytes;
-	if (sign)
-		length++;
-	fxConstructArrayBufferResult(the, mxThis, length);
+	if (length < total) {
+		if (endian == EndianBig)
+			offset = total - length;
+	}
+	else {
+		total = length;
+	}
+	if (sign) {
+		offset++;
+		total++;
+	}
+	fxConstructArrayBufferResult(the, mxThis, total);
 	src = (txU1*)(bigint->data);
 	dst = (txU1*)(mxResult->value.reference->next->value.arrayBuffer.address);
-	if (sign) {
-		*dst++ = bigint->sign;
-		length--;
-	}
-	if (prepend > 0 && endian == EndianBig) {
-		length -= prepend;
-		while (--prepend >= 0)
-			*dst++ = 0;
-	}
+	if (sign)
+		*dst = bigint->sign;
+	dst += offset;
 #if mxBigEndian
 	if (endian != EndianLittle) {
 #else
@@ -560,10 +563,6 @@ void fxBigintToArrayBuffer(txMachine* the, txSlot* slot, txU4 minBytes, txBoolea
 			dst++;
 			length--;
 		}
-	}
-	if (prepend > 0 && endian == EndianLittle) {
-		while (--prepend >= 0)
-			*dst++ = 0;
 	}
 }
 
@@ -748,6 +747,9 @@ txBigInt* fxStringToBigInt(txMachine* the, txSlot* slot, txFlag whole)
 	}
 	if (c == '-') {
 		sign = 1;
+		p++;
+	}
+	else if (c == '+') {
 		p++;
 	}
 	offset = mxPtrDiff(p - s);
@@ -1192,7 +1194,7 @@ txBigInt *fxBigInt_lsl(txMachine* the, txBigInt *r, txBigInt *a, txBigInt *b)
 		if (a->sign) {
 			r = fxBigInt_ulsr1(the, r, a, b->data[0]);
             if (b->data[0])
-                r = fxBigInt_uadd(the, r, r, (txBigInt *)&gxBigIntOne);
+                r = fxBigInt_uadd(the, C_NULL, r, (txBigInt *)&gxBigIntOne);
 			r->sign = 1;
 		}
 		else
@@ -1244,7 +1246,7 @@ txBigInt *fxBigInt_lsr(txMachine* the, txBigInt *r, txBigInt *a, txBigInt *b)
 		if (a->sign) {
 			r = fxBigInt_ulsr1(the, r, a, b->data[0]);
             if (b->data[0])
-                r = fxBigInt_uadd(the, r, r, (txBigInt *)&gxBigIntOne);
+                r = fxBigInt_uadd(the, C_NULL, r, (txBigInt *)&gxBigIntOne);
 			r->sign = 1;
 		}
 		else
@@ -1570,7 +1572,11 @@ txBigInt *fxBigInt_exp(txMachine* the, txBigInt *r, txBigInt *a, txBigInt *b)
 		txU4 c = fxBigInt_bitsize(a);
 		txBigInt *t = fxBigInt_umul1(the, NULL, b, c);
 		t = fxBigInt_ulsr1(the, t, t, 5);
-		c = 2 + t->data[0]; //@@
+#ifdef mxRun
+		if ((t->size > 1) || (t->data[0] > 0xFFFF))
+			mxRangeError("too big exponent");
+#endif
+		c = 2 + t->data[0];
 		fxBigInt_free(the, t);
         if (r == NULL)
 			r = fxBigInt_alloc(the, c);

@@ -18,10 +18,11 @@
 *
 */
 
-import PixelsOut from "commodetto/PixelsOut"
-import Bitmap from "commodetto/Bitmap"
 
 declare module "commodetto/Poco" {
+  import PixelsOut from "commodetto/PixelsOut"
+  import Bitmap from "commodetto/Bitmap"
+
   type Rectangle = {
     x: number,
     y: number,
@@ -29,14 +30,9 @@ declare module "commodetto/Poco" {
     height: number,
   }
 
-  type Font = HostBuffer    //@@ share full interface with commodetto/parseBMF
+  type Font = any    //@@ share full interface with commodetto/parseBMF
 
-  class Poco {
-    constructor(pixelsOut, options?: {
-      pixels?: number,
-      displayListLength?: number,
-      rotation?: (0 | 90 | 180 | 270)
-    })
+  export interface PocoPrototype {
     close(): void
     begin(x?: number, y?: number, width?: number, height?: number): void
     begin(rectangle: Rectangle): void
@@ -62,7 +58,7 @@ declare module "commodetto/Poco" {
     drawMonochrome(monochrome: object, fore: number | undefined, back: number | undefined, x: number, y: number, sx: number, sy: number, sw: number, sh: number): void
 
     drawGray(bits: Bitmap, color: number, x: number, y: number): void
-    drawGray(bits: Bitmap, color: number, x: number, y: number, sx: number, sy): void
+    drawGray(bits: Bitmap, color: number, x: number, y: number, sx: number, sy: number): void
     drawGray(bits: Bitmap, color: number, x: number, y: number, sx: number, sy: number, sw: number, sh: number): void
     drawGray(bits: Bitmap, color: number, x: number, y: number, sx: number, sy: number, sw: number, sh: number, blend: number): void
 
@@ -72,7 +68,7 @@ declare module "commodetto/Poco" {
     fillPattern(bits: Bitmap, x: number, y: number, w: number, h: number): void
     fillPattern(bits: Bitmap, x: number, y: number, w: number, h: number, sx: number, sy: number, sw: number, sh: number): void
   
-  	drawFrame(frame: ArrayBuffer | HostBuffer, stream: {width: number, height: number}, x: number, y: number): void
+    drawFrame(frame: ArrayBuffer | HostBuffer, stream: { width: number, height: number }, x: number, y: number): void
 
     drawText(text: string, font: Font, color: number, x: number, y: number, width?: number): void
     getTextWidth(text: string, font: Font): number
@@ -87,6 +83,22 @@ declare module "commodetto/Poco" {
     readonly height: number
     readonly pixelsOut: PixelsOut
   }
-}
 
-export {Poco as default};
+  interface PocoDictionary {
+    pixels?: number,
+    displayListLength?: number,
+    rotation?: (0 | 90 | 180 | 270)
+  }
+
+  export interface PocoConstructor {
+    new(pixelsOut: PixelsOut, options?: PocoDictionary): PocoPrototype
+  }
+
+  var Poco: PocoConstructor
+
+  global {
+    const screen: PixelsOut
+  }
+
+  export default Poco
+}

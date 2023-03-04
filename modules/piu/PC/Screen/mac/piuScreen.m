@@ -86,6 +86,7 @@ struct PiuScreenStruct {
     txScreen* screen;
 	PiuRectangleRecord hole;
 	xsIntegerValue rotation;
+	xsNumberValue transparency;
 };
 
 struct PiuScreenMessageStruct {
@@ -142,7 +143,9 @@ struct PiuScreenMessageStruct {
 	CGContextTranslateCTM(context, dstRect.size.width/2, dstRect.size.height/2);
 	CGContextRotateCTM(context, (*piuScreen)->rotation * (M_PI/180.0));
 	CGContextTranslateCTM(context, -srcRect.size.width/2, -srcRect.size.height/2);
+	CGContextSetAlpha(context, 1.0 - (*piuScreen)->transparency);
 	CGContextDrawImage(context, srcRect, image);
+	CGContextSetAlpha(context, 1.0);
 	CGImageRelease(image);
 	CGDataProviderRelease(provider);
 	CGColorSpaceRelease(colorSpace);
@@ -614,6 +617,20 @@ void PiuScreen_get_running(xsMachine* the)
 	xsResult = (*self)->nsScreenView.library ? xsTrue : xsFalse;
 }
 	
+void PiuScreen_get_transparency(xsMachine* the)
+{
+	PiuScreen* self = PIU(Screen, xsThis);
+	xsResult = xsNumber((*self)->transparency);
+}
+
+void PiuScreen_set_transparency(xsMachine* the)
+{
+	PiuScreen* self = PIU(Screen, xsThis);
+	(*self)->transparency = xsToNumber(xsArg(0));
+	PiuContentInvalidate(self, NULL);
+	[(*self)->nsScreenView display];
+}
+
 void PiuScreen_launch(xsMachine* the)
 {
 	PiuScreen* self = PIU(Screen, xsThis);
@@ -645,6 +662,21 @@ void PiuScreen_quit(xsMachine* the)
 {
 	PiuScreen* self = PIU(Screen, xsThis);
     [(*self)->nsScreenView quitMachine];
+}
+
+void PiuScreen_writePNG(xsMachine* the)
+{
+	PiuScreen* self = PIU(Screen, xsThis);
+	txScreen* screen = (*self)->screen;
+	CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+	CGDataProviderRef provider = CGDataProviderCreateWithData(nil, screen->buffer, screen->width * screen->height * screenBytesPerPixel, nil);
+	CGImageRef image = CGImageCreate(screen->width, screen->height, 8, 32, screen->width * screenBytesPerPixel, colorSpace, kCGBitmapByteOrder32Big | kCGImageAlphaNoneSkipLast, provider, nil, NO, kCGRenderingIntentDefault);
+    CFStringRef path = CFStringCreateWithCString(NULL, xsToString(xsArg(0)), kCFStringEncodingUTF8);
+	CFURLRef url = CFURLCreateWithFileSystemPath(NULL, path, kCFURLPOSIXPathStyle, false);
+    CFStringRef type = CFStringCreateWithCString(NULL, "public:png", kCFStringEncodingUTF8);
+	CGImageDestinationRef destination = CGImageDestinationCreateWithURL(url, type, 1, NULL);
+    CGImageDestinationAddImage(destination, image, NULL);
+	CGImageDestinationFinalize(destination);
 }
 
 void fxScreenAbort(txScreen* screen, int status)

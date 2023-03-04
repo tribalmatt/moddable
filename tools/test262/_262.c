@@ -184,7 +184,7 @@ void _xsbug_main(txMachine* the)
 	root = &(gxAgentCluster.root);
 	root->preparation = preparation;
 	root->keyArray = preparation->keys;
-	root->keyCount = (txID)preparation->keyCount + (txID)preparation->creation.keyCount;
+	root->keyCount = (txID)preparation->keyCount + (txID)preparation->creation.initialKeyCount;
 	root->keyIndex = (txID)preparation->keyCount;
 	root->nameModulo = preparation->nameModulo;
 	root->nameTable = preparation->names;
@@ -224,8 +224,8 @@ void _xsbug_import_(txMachine* the)
 	mxDub();
 	fxGetID(the, mxID(_then));
 	mxCall();
-	fxNewHostFunction(the, _xsbug_importFulfilled, 1, XS_NO_ID);
-	fxNewHostFunction(the, _xsbug_importRejected, 1, XS_NO_ID);
+	fxNewHostFunction(the, _xsbug_importFulfilled, 1, XS_NO_ID, XS_NO_ID);
+	fxNewHostFunction(the, _xsbug_importRejected, 1, XS_NO_ID, XS_NO_ID);
 	mxRunCount(2);
 	mxPop();
 	if (xsTest(xsArg(1)))
@@ -244,10 +244,10 @@ void _xsbug_module_(txMachine* the)
 		parser->firstJump = &jump;
 		if (c_setjmp(jump.jmp_buf) == 0) {
 			txStringStream stream;
-			stream.slot = mxArgv(1);
+			stream.slot = mxArgv(3);
 			stream.offset = 0;
-			stream.size = c_strlen(stream.slot->value.string);
-			parser->path = fxNewParserSymbol(parser, fxToString(the, mxArgv(2)));
+			stream.size = fxToInteger(the, mxArgv(5)) - 1;
+			parser->path = fxNewParserSymbol(parser, fxToString(the, mxArgv(1)));
 			fxParserTree(parser, &stream, fxStringGetter, mxDebugFlag | mxStrictFlag, &name);
 			fxParserHoist(parser);
 			fxParserBind(parser);
@@ -283,10 +283,10 @@ void _xsbug_script_(txMachine* the)
 		parser->firstJump = &jump;
 		if (c_setjmp(jump.jmp_buf) == 0) {
 			txStringStream stream;
-			stream.slot = mxArgv(1);
+			stream.slot = mxArgv(3);
 			stream.offset = 0;
-			stream.size = c_strlen(stream.slot->value.string);
-			parser->path = fxNewParserSymbol(parser, fxToString(the, mxArgv(2)));
+			stream.size = fxToInteger(the, mxArgv(5)) - 1;
+			parser->path = fxNewParserSymbol(parser, fxToString(the, mxArgv(1)));
 			fxParserTree(parser, &stream, fxStringGetter, mxProgramFlag | mxDebugFlag | mxStrictFlag, &name);
 			fxParserHoist(parser);
 			fxParserBind(parser);
@@ -301,7 +301,7 @@ void _xsbug_script_(txMachine* the)
 		strcat(name, parser->path->string);
 		mxModuleInstanceInternal(mxProgram.value.reference)->value.module.id = fxID(the, name);
 		fxTerminateParser(parser);
-		if (xsTest(xsArg(3)))
+		if (xsTest(xsArg(2)))
 			gxTest262Async = TEST262_ASYNC_WAITING;
 		fxRunScript(the, script, mxRealmGlobal(realm), C_NULL, mxRealmClosures(realm)->value.reference, C_NULL, mxProgram.value.reference);
 		mxPop();
@@ -482,7 +482,8 @@ void* _262_agent_start_aux(void* it)
 		512, 				/* initialHeapCount */
 		64, 				/* incrementalHeapCount */
 		256, 				/* stackCount */
-		1024, 				/* keyCount */
+		1024, 				/* initialKeyCount */
+		0,	 				/* incrementalKeyCount */
 		127, 				/* nameModulo */
 		127,				/* symbolModulo */
 		2048,				/* parserBufferSize */

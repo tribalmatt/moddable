@@ -46,18 +46,24 @@ C_OPTIONS = \
 	/D INCLUDE_XSPLATFORM \
 	/D XSPLATFORM=\"xst.h\" \
 	/D mxDebug=1 \
+	/D mxDeepQual=1 \
+	/D mxLockdown=1 \
 	/D mxNoConsole=1 \
 	/D mxParse=1 \
+	/D mxProfile=1 \
 	/D mxRun=1 \
 	/D mxSloppy=1 \
 	/D mxSnapshot=1 \
 	/D mxRegExpUnicodePropertyEscapes=1 \
+	/D mxStringNormalize=1 \
+	/D mxMinusZero=1 \
 	/I$(INC_DIR) \
 	/I$(PLT_DIR) \
 	/I$(SRC_DIR) \
 	/I$(TLS_DIR) \
 	/I$(TLS_DIR)\yaml \
-	/nologo
+	/nologo \
+	/MP
 !IF "$(GOAL)"=="debug"
 C_OPTIONS = $(C_OPTIONS) \
 	/D _DEBUG \
@@ -101,6 +107,7 @@ OBJECTS = \
 	$(TMP_DIR)\xsGlobal.o \
 	$(TMP_DIR)\xsJSON.o \
 	$(TMP_DIR)\xsLexical.o \
+	$(TMP_DIR)\xsLockdown.o \
 	$(TMP_DIR)\xsMapSet.o \
 	$(TMP_DIR)\xsMarshall.o \
 	$(TMP_DIR)\xsMath.o \
@@ -133,6 +140,10 @@ OBJECTS = \
 	$(TMP_DIR)\reader.o \
 	$(TMP_DIR)\scanner.o \
 	$(TMP_DIR)\writer.o \
+	$(TMP_DIR)\xsmc.o \
+	$(TMP_DIR)\textdecoder.o \
+	$(TMP_DIR)\textencoder.o \
+	$(TMP_DIR)\modBase64.o \
 	$(TMP_DIR)\xst.o
 
 build : $(TMP_DIR) $(BIN_DIR) $(BIN_DIR)\$(NAME).exe
@@ -157,12 +168,30 @@ $(OBJECTS) : $(SRC_DIR)\xsCommon.h
 $(OBJECTS) : $(SRC_DIR)\xsAll.h
 $(OBJECTS) : $(SRC_DIR)\xsScript.h
 
-{$(SRC_DIR)\}.c{$(TMP_DIR)\}.o:
-	cl $< $(C_OPTIONS) /Fo$@
-{$(TLS_DIR)\}.c{$(TMP_DIR)\}.o:
-	cl $< $(C_OPTIONS) /Fo$@
-{$(TLS_DIR)\yaml\}.c{$(TMP_DIR)\}.o:
-	cl $< $(C_OPTIONS) /Fo$@
+{$(SRC_DIR)\}.c{$(TMP_DIR)\}.o::
+	cd $(TMP_DIR)
+	cl $< $(C_OPTIONS)
+	rename *.obj *.o
+{$(TLS_DIR)\}.c{$(TMP_DIR)\}.o::
+	cd $(TMP_DIR)
+	cl $< $(C_OPTIONS)
+	rename *.obj *.o
+{$(TLS_DIR)\yaml\}.c{$(TMP_DIR)\}.o::
+	cd $(TMP_DIR)
+	cl $< $(C_OPTIONS)
+	rename *.obj *.o
+{$(MODDABLE)\modules\data\text\decoder\}.c{$(TMP_DIR)\}.o:
+	cd $(TMP_DIR) 
+	cl $< $(C_OPTIONS)
+	rename *.obj *.o
+{$(MODDABLE)\modules\data\text\encoder\}.c{$(TMP_DIR)\}.o:
+	cd $(TMP_DIR)
+	cl $< $(C_OPTIONS)
+	rename *.obj *.o
+{$(MODDABLE)\modules\data\base64\}.c{$(TMP_DIR)\}.o:
+	cd $(TMP_DIR)
+	cl $< $(C_OPTIONS)
+	rename *.obj *.o
 
 clean :
 	del /Q $(BUILD_DIR)\bin\win\debug\$(NAME).exe

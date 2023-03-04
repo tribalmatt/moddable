@@ -265,7 +265,7 @@ txInteger fx_Date_parse_fraction(txByte* theCharacter, txString* theString)
 	}
 	*theCharacter = c;
 	*theString = p;
-	return (txInteger)c_round(aResult);
+	return (txInteger)c_trunc(aResult);
 }
 
 void fx_Date_parse(txMachine* the)
@@ -563,6 +563,8 @@ void fx_Date_parse(txMachine* the)
 			goto fail;
 	}
    if (dt.year < 0)
+       goto fail;
+	if ((yearSign < 0) && (dt.year == 0))
        goto fail;
 	if (dt.month < 0)
 		dt.month = 0;

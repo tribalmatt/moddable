@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2020  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022  Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -100,8 +100,19 @@ void xs_file_read(xsMachine *the)
 		dst = xsmcToString(xsResult);
 	}
 	else {
+		xsmcGet(xsVar(0), xsGlobal, xsID_ArrayBuffer);
+		s2 = &xsVar(0);
+		if (s1->data[2] == s2->data[2]) {	
 		xsmcSetArrayBuffer(xsResult, NULL, dstLen);
 		dst = xsmcToArrayBuffer(xsResult);
+	}
+		else {
+			xsUnsignedValue len;
+			xsmcGetBufferWritable(xsArg(0), (void **)&dst, &len);
+			if (((uint32_t)dstLen) > len)
+				dstLen = len;
+			xsResult = xsArg(0);
+		}
 	}
 
 	result = fread(dst, 1, dstLen, file);
@@ -131,8 +142,9 @@ void xs_file_write(xsMachine *the)
 			srcLen = 1;
 		}
 		else {
-			src = xsmcToArrayBuffer(xsArg(i));
-			srcLen = xsmcGetArrayBufferLength(xsArg(i));
+			xsUnsignedValue len;
+			xsmcGetBufferReadable(xsArg(i), (void **)&src, &len);
+			srcLen = len;
 		}
 
 		result = fwrite(src, 1, srcLen, file);
@@ -198,25 +210,28 @@ void xs_file_exists(xsMachine *the)
 void xs_file_rename(xsMachine *the)
 {
 	char* path;
-    char toPath[PATH_MAX + 1];
-    int32_t result;
-    char* slash;
-    size_t pathLength = 0;
+	char toPath[PATH_MAX + 1];
+	int result;
 
-    path = xsmcToString(xsArg(0));
-    slash = c_strrchr(path, '/');
-    if (slash){
-        pathLength = slash - path + 1;
-		if (pathLength >= sizeof(toPath)) xsUnknownError("path is too long");
-        c_memcpy(toPath, path, pathLength);
-        toPath[pathLength] = '\0';
-    }
+	xsmcToStringBuffer(xsArg(1), toPath, sizeof(toPath));
+	path = xsmcToString(xsArg(0));
+	if ('/' != toPath[0]) {
+		if (c_strchr(toPath + 1, '/'))
+			xsUnknownError("invalid to");
 
-    xsmcToStringBuffer(xsArg(1), toPath + pathLength, sizeof(toPath) - pathLength);
-    path = xsmcToString(xsArg(0));
+		char *slash = c_strrchr(path, '/');
+		if (!slash)
+			xsUnknownError("invalid from");
+
+		size_t pathLength = slash - path + 1;
+		if (pathLength >= (c_strlen(path) + sizeof(toPath)))
+			xsUnknownError("path too long");
+
+		c_strcpy(toPath, path);
+		xsmcToStringBuffer(xsArg(1), toPath + pathLength, sizeof(toPath) - pathLength);
+	}
 
 	result = rename(path, toPath);
-
 	xsResult = xsBoolean(result == 0);
 }
 

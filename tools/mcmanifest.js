@@ -20,6 +20,7 @@
 
 import { FILE, TOOL } from "tool";
 import UncodeRanges from "unicode-ranges";
+import URL from "url";
 
 var formatNames = {
 	gray16: "gray16",
@@ -362,6 +363,12 @@ export class MakeFile extends FILE {
 		this.line("TMP_DIR = ", tool.tmpPath);
 		this.line("LIB_DIR = ", tool.libPath);
 		this.line("XS_DIR = ", tool.xsPath);
+		this.line("XSBUG_HOST = ", tool.xsbug?.host ?? "localhost");
+		this.line("XSBUG_PORT = ", tool.xsbug?.port ?? 5002);
+
+		if (tool.xsbugLog)
+			this.line("XSBUG_LOG = 1");
+		
 		this.line("");
 
 		this.generateManifestDefinitions(tool);
@@ -382,6 +389,16 @@ export class MakeFile extends FILE {
 	}
 	generateModulesDefinitions(tool) {
 		this.write("MODULES =");
+		for (var result of tool.nodered2mcuFiles) {
+			this.write("\\\n\t$(MODULES_DIR)");
+			this.write(tool.slash);
+			this.write(result.target + ".xsb");
+		}
+		for (var result of tool.cdvFiles) {
+			this.write("\\\n\t$(MODULES_DIR)");
+			this.write(tool.slash);
+			this.write(result.target + ".xsb");
+		}
 		for (var result of tool.jsFiles) {
 			this.write("\\\n\t$(MODULES_DIR)");
 			this.write(tool.slash);
@@ -396,6 +413,50 @@ export class MakeFile extends FILE {
 		this.line("");
 	}
 	generateModulesRules(tool) {
+		const generatedTS = [];
+
+		for (let result of tool.nodered2mcuFiles) {
+			let source = result.source;
+			let target = result.target;
+			const extension = ".js";
+			const output = "$(MODULES_DIR)" + tool.slash + target + extension;
+			this.line(output, ": ", source);
+			this.echo(tool, "nodered2mcu ", target);
+			this.line("\tnodered2mcu ", source, " -o $(@D)");
+
+			tool.jsFiles.push({
+				source: tool.modulesPath + tool.slash + target + extension,
+				target: target + ".xsb"
+			});
+		}
+
+		for (let result of tool.cdvFiles) {
+			let source = result.source;
+			let target = result.target;
+			const extension = ("typescript" === result.query?.language) ? ".ts" : ".js";
+			const output = "$(MODULES_DIR)" + tool.slash + target + extension;
+			this.line(output, ": ", source);
+			this.echo(tool, "cdv ", target);
+			let pragmas = "";
+			for (const name in result.query)
+				pragmas += " " + "-p " + name + "=" + result.query[name];
+			this.line("\tcdv ", source, " -o $(@D)", " -n ", target, pragmas);
+
+			if (".js" === extension) {
+				tool.jsFiles.push({
+					source: tool.modulesPath + tool.slash + target + extension,
+					target: target + ".xsb"
+				});
+			}
+			else {
+				tool.tsFiles.push({
+					source: tool.modulesPath + tool.slash + target + extension,
+					target: target + ".xsb"
+				});
+				generatedTS.push(output);
+			}
+		}
+
 		for (var result of tool.jsFiles) {
 			var source = result.source;
 			var sourceParts = tool.splitPath(source);
@@ -408,7 +469,7 @@ export class MakeFile extends FILE {
 				options += " -p";
 			if (tool.debug)
 				options += " -d";
-			if (tool.config)
+			if (tool.nativeCode)
 				options += " -c";
 			this.line("\t$(XSC) ", source, options, " -e -o $(@D) -r ", targetParts.name);
 		}
@@ -420,13 +481,16 @@ export class MakeFile extends FILE {
 			let common;
 			if (length > 1) {
 				directories.sort();
-				const first =  directories[0];
-				const last = directories[length - 1];
-				const firstLength = first.length;
-				const lastLength = last.length;
-				common = 0;
-    			while ((common < firstLength) && (common < lastLength) && (first.charAt(common) === last.charAt(common))) 
-    				common++;
+				let first = directories[0].split(tool.slash);
+				let last = directories[length - 1].split(tool.slash);
+				const c = Math.min(first.length, last.length);
+				let i = 0;
+				while (i < c) {
+					if (first[i] != last[i])
+						break;
+					i++;
+				}
+				common = first.slice(0, i).join(tool.slash).length;
 			}
 			else
 				common = directories[0].length;
@@ -436,26 +500,26 @@ export class MakeFile extends FILE {
 				var target = result.target;
 				var targetParts = tool.splitPath(target);
 				var temporary = source.slice(common, -3) + ".js"
-				this.line("$(MODULES_DIR)", tool.slash, target, ": $(MODULES_DIR)", tool.slash, temporary);
+				this.line("$(MODULES_DIR)", tool.slash, target, ": $(MODULES_DIR)", temporary);
 				this.echo(tool, "xsc ", target);
 				var options = "";
 				if (result.commonjs)
 					options += " -p";
 				if (tool.debug)
 					options += " -d";
-				if (tool.config)
+				if (tool.nativeCode)
 					options += " -c";
-				this.line("\t$(XSC) $(MODULES_DIR)", tool.slash, temporary, options, " -e -o $(@D) -r ", targetParts.name);
+				this.line("\t$(XSC) $(MODULES_DIR)", temporary, options, " -e -o $(@D) -r ", targetParts.name);
 				if (tool.windows)
-					this.line("$(MODULES_DIR)", tool.slash, temporary, ": TSCONFIG");
+					this.line("$(MODULES_DIR)", temporary, ": TSCONFIG");
 				temporaries.push("%" + temporary);
 			}
 			if (tool.windows)
 				this.line("TSCONFIG:");
 			else
-				this.line(temporaries.join(" "), " : ", "%", tool.slash, "tsconfig.json");
+				this.line(temporaries.join(" "), " : ", "%", tool.slash, "tsconfig.json ", generatedTS.join(" "));
 			this.echo(tool, "tsc ", "tsconfig.json");
-			this.line("\ttsc -p $(MODULES_DIR)", tool.slash, "tsconfig.json");
+			this.line("\t", tool.typescript.compiler, " -p $(MODULES_DIR)", tool.slash, "tsconfig.json");
 			this.line("");
 		}
 	}
@@ -732,6 +796,9 @@ export class MakeFile extends FILE {
 		for (var result of tool.outlineFontFiles) {
 			var source = result.source;
 			
+			if (!tool.getenv("FONTBM"))
+				throw new Error("$(FONTBM) environemnt variable not set");
+			
 			result.faces.forEach(face => {
 				const name = face.name + "-" + face.size;
 
@@ -848,10 +915,7 @@ export class TSConfigFile extends FILE {
 				lib: ["es2020"],
 				sourceMap: true,
 				target: "ES2020",
-				types: [
-					tool.xsPath + tool.slash + "includes" + tool.slash +"xs",
-					...tool.tsconfig.types
-				]
+				...tool.typescript.tsconfig?.compilerOptions
 			},
 			files: [
 			]
@@ -861,6 +925,7 @@ export class TSConfigFile extends FILE {
 			var specifier = result.target.slice(0, -2);
 			if (tool.windows)
 				specifier = specifier.replaceAll("\\", "/");
+			specifier = tool.unresolvePrefix(specifier);
 			paths[specifier] = [ result.source.slice(0, -5) ];
 		}
 		for (var result of tool.tsFiles) {
@@ -1078,7 +1143,7 @@ class BLERule extends Rule {
 };
 
 class ModulesRule extends Rule {
-	appendSource(target, source, include, suffix, parts, kind) {
+	appendSource(target, source, include, suffix, parts, kind, query) {
 		var tool = this.tool;
 		if (kind < 0)
 			return;
@@ -1099,6 +1164,16 @@ class ModulesRule extends Rule {
 		else if (parts.extension == ".h") {
 			this.appendFolder(tool.cFolders, parts.directory);
 			this.appendFolder(tool.hFiles, source);
+			if ("cdv" === query.transform) {
+				const result = this.appendFile(tool.cdvFiles, target, source, include);
+				if (result) {
+					result.query = {...query};
+					delete result.query.source; 
+					delete result.query.transform; 
+				}
+			}
+			else if (parts.name.endsWith(".cdv"))
+				this.appendFile(tool.cdvFiles, target.slice(0, -4), source, include);
 		}
 		else if (parts.extension == ".ts") {
 			if (parts.name.endsWith(".d")) {
@@ -1107,6 +1182,10 @@ class ModulesRule extends Rule {
 			else {
 				this.appendFile(tool.tsFiles, target + ".xsb", source, include);
 			}
+		}
+		else if (parts.extension == ".json") {
+			if ("nodered2mcu" === query.transform)
+				this.appendFile(tool.nodered2mcuFiles, target, source, include);
 		}
 	}
 	appendTarget(target) {
@@ -1317,7 +1396,6 @@ export class Tool extends TOOL {
 		this.mainPath = null;
 		this.make = false;
 		this.manifestPath = null;
-		this.mcsim = false;
 		this.outputPath = null;
 		this.platform = null;
 		this.rotation = undefined;
@@ -1381,10 +1459,8 @@ export class Tool extends TOOL {
 				let parts = name.split("/");
 				if ("esp8266" === parts[0])
 					parts[0] = "esp";
-				else if ((parts[0] == "sim") || (parts[0] == "simulator")) {
+				else if ((parts[0] == "sim") || (parts[0] == "simulator"))
 					parts[0] = this.currentPlatform;
-					this.mcsim = true;
-				}
 				this.platform = parts[0];
 				if (parts[1]) {
 					this.subplatform = parts[1];
@@ -1431,6 +1507,22 @@ export class Tool extends TOOL {
 					this.buildTarget = argv[argi];
 				else
 					this.buildTarget = this.buildTarget + " " + argv[argi];
+				break;
+			case "-x":
+				argi++;
+				if (argi >= argc)
+					throw new Error("-x: no host");
+				name = argv[argi];
+				if (undefined !== this.xsbug)
+					throw new Error("-x '" + name + "': only one!");
+				name = name.split(":");
+				this.xsbug = {
+					host: name[0],
+					port: name[1]
+				};
+				break;
+			case "-l":
+				this.xsbugLog = true;
 				break;
 			default:
 				name = argv[argi];
@@ -1505,24 +1597,13 @@ export class Tool extends TOOL {
 			this.format = null;
 		else if (!this.format)
 			this.format = "UNDEFINED";
-		if (this.mcsim) {
-			if (this.platform == "mac")
-				this.environment.SIMULATOR = this.moddablePath + "/build/bin/mac/debug/mcsim.app";
-			else if (this.platform == "win")
-				this.environment.SIMULATOR = this.moddablePath + "\\build\\bin\\win\\debug\\mcsim.exe";
-			else if (this.platform == "lin")
-				this.environment.SIMULATOR = this.moddablePath + "/build/bin/lin/debug/mcsim";
-			this.environment.BUILD_SIMULATOR = this.moddablePath + this.slash + "build" + this.slash + "simulators";
-		}
-		else {
-			if (this.platform == "mac")
-				this.environment.SIMULATOR = this.moddablePath + "/build/bin/mac/debug/Screen Test.app";
-			else if (this.platform == "win")
-				this.environment.SIMULATOR = this.moddablePath + "\\build\\bin\\win\\debug\\simulator.exe";
-			else if (this.platform == "lin")
-				this.environment.SIMULATOR = this.moddablePath + "/build/bin/lin/debug/simulator";
-			this.environment.BUILD_SIMULATOR = this.moddablePath + this.slash + "build" + this.slash + "simulator";
-		}
+		if (this.platform == "mac")
+			this.environment.SIMULATOR = this.moddablePath + "/build/bin/mac/debug/mcsim.app";
+		else if (this.platform == "win")
+			this.environment.SIMULATOR = this.moddablePath + "\\build\\bin\\win\\debug\\mcsim.exe";
+		else if (this.platform == "lin")
+			this.environment.SIMULATOR = this.moddablePath + "/build/bin/lin/debug/mcsim";
+		this.environment.BUILD_SIMULATOR = this.moddablePath + this.slash + "build" + this.slash + "simulators";
 	}
 	concatProperties(object, properties, flag) {
 		if (properties) {
@@ -1550,18 +1631,74 @@ export class Tool extends TOOL {
 			this.createDirectory(path)
 		}
 	}
-	includeManifest(name) {
+	includeManifest(it) {
 		var currentDirectory = this.currentDirectory;
-		var path = this.resolveFilePath(name);
+		if ("string" == typeof it) {
+			this.includeManifestPath(this.resolveVariable(it));
+		}
+		else if (this.buildTarget != "clean") {
+			let { git, branch, tag, include = "manifest.json" } = it;
+			if (!git)
+				throw new Error("no git!");
+			let repo = this.resolveVariable(git);
+			if (this.windows)
+				repo = repo.replace(/\\/g, "/");
+			let url = new URL(repo);
+			
+			let directory = "repos/" + url.hostname + url.pathname;
+			if (directory.endsWith(".git"))
+				directory = directory.slice(0, -4);
+			if (branch)
+				directory += "/" + branch;
+			if (tag)
+				directory += "/" + tag;
+			
+			let parts = directory.split("/");
+			let path = this.createDirectories(this.outputPath, "tmp", this.environment.NAME);
+			directory = path + this.slash + parts.join(this.slash);
+			
+			if (this.isDirectoryOrFile(directory) == 0) {
+				for (let part of parts) {
+					path += this.slash + part;
+					this.createDirectory(path);
+				}
+				this.currentDirectory = path;
+				this.report("# git clone " + repo + " to path " + path);
+				let result;
+				if (branch)
+					result = this.spawn("git", "clone", "-b", branch, repo, ".");
+				else
+					result = this.spawn("git", "clone", repo, ".");
+				if (result != 0)
+					throw new Error("git failed!");
+				if (tag) {
+					result = this.spawn("git", "-c", "advice.detachedHead=false", "checkout", tag);
+					if (result != 0)
+						throw new Error("git failed!");
+				}
+			}
+// 			else {
+// 				this.currentDirectory = directory;
+// 				this.report("# git pull " + name);
+// 				this.spawn("git", "pull");
+// 			}
+			if (include instanceof Array)
+				include.forEach(it => this.includeManifestPath(directory + this.slash + this.resolveVariable(it)));
+			else
+				this.includeManifestPath(directory + this.slash + this.resolveVariable(include));
+		}
+		this.currentDirectory = currentDirectory;
+	}
+	includeManifestPath(include) {
+		let path = this.resolveFilePath(include);
 		if (!path)
-			throw new Error("'" + name + "': manifest not found!");
+			throw new Error("'" + include + "': manifest not found!");
 		if (!this.manifests.already[path]) {
 			var parts = this.splitPath(path);
 			this.currentDirectory = parts.directory;
 			var manifest = this.parseManifest(path);
 			manifest.directory = parts.directory;
 		}
-		this.currentDirectory = currentDirectory;
 	}
 	matchPlatform(platforms, name, simple) {
 		let parts = name.split("/");
@@ -1618,8 +1755,37 @@ export class Tool extends TOOL {
 		all.errors = this.concatProperty(all.errors, platform.error);
 		all.warnings = this.concatProperty(all.warnings, platform.warning);
 		this.mergeProperties(all.run, platform.run);
-		if (platform.tsconfig?.types)
-			all.tsconfig.types = this.concatProperty(all.tsconfig.types, platform.tsconfig.types.map(path => this.resolveSource(path)));
+		if (platform.typescript) {
+			let tsconfig = platform.typescript.tsconfig;
+			if (tsconfig) {
+				tsconfig = JSON.parse(JSON.stringify(tsconfig), (name, value) => {
+					if ("string" === typeof value)
+						value = this.resolveVariable(value);
+					return value;
+				});
+
+				const compilerOptions = tsconfig.compilerOptions;
+				for (let name in compilerOptions) {
+					let value = compilerOptions[name];
+					if ("types" === name)
+						value = value.map(path => this.resolveSource(path));
+					if ("object" === typeof value) {
+						if (value instanceof Array) {
+							all.typescript.tsconfig.compilerOptions[name] ??= [];
+							all.typescript.tsconfig.compilerOptions[name] = value.concat(all.typescript.tsconfig.compilerOptions[name]); 
+						}
+						else {
+							all.typescript.tsconfig.compilerOptions[name] ??= {};
+							this.mergeProperties(all.typescript.tsconfig.compilerOptions[name], value);
+						}
+					}
+					else
+						all.typescript.tsconfig.compilerOptions[name] = value;
+				}
+			}
+
+			all.typescript.compiler = platform.typescript.compiler ?? all.typescript.compiler;
+		}
 		return;
 	}
 	mergeProperties(targets, sources) {
@@ -1671,16 +1837,19 @@ export class Tool extends TOOL {
 				if (platformInclude) {
 					if (!("include" in manifest))
 						manifest.include = platformInclude;
-					else
-						manifest.include = manifest.include.concat(manifest.include, platformInclude);
+					else {
+						if ("string" === typeof manifest.include)
+							manifest.include = [manifest.include];
+						manifest.include = manifest.include.concat(platformInclude);
+					}
 				}
 			}
 		}
 		if ("include" in manifest) {
 			if (manifest.include instanceof Array)
-				manifest.include.forEach(include => this.includeManifest(this.resolveVariable(include)));
+				manifest.include.forEach(include => this.includeManifest(include));
 			else
-				this.includeManifest(this.resolveVariable(manifest.include));
+				this.includeManifest(manifest.include);
 		}
 		this.manifests.push(manifest);
 		return manifest;
@@ -1741,7 +1910,7 @@ export class Tool extends TOOL {
 			errors:[],
 			warnings:[],
 			run:{},
-			tsconfig: {types: []}
+			typescript: {compiler: "tsc", tsconfig: {compilerOptions: {}}}
 		};
 		this.manifests.forEach(manifest => this.mergeManifest(this.manifest, manifest));
 
@@ -1777,6 +1946,12 @@ export class Tool extends TOOL {
 		this.tsFiles.already = {};
 		this.dtsFiles = [];
 		this.dtsFiles.already = {};
+		
+		this.cdvFiles = [];
+		this.cdvFiles.already = {};
+		
+		this.nodered2mcuFiles = [];
+		this.nodered2mcuFiles.already = {};
 
 		this.resourcesFiles = [];
 		this.resourcesFiles.already = {};
@@ -1823,6 +1998,12 @@ export class Tool extends TOOL {
 		this.environment.DASH_SIGNATURE = signature.join("-");
 		this.environment.DOT_SIGNATURE = signature.join(".");
 		this.environment.SLASH_SIGNATURE = "/" + signature.join("/");
+	}
+	unresolvePrefix(value) {
+		if (value.startsWith("~.")) {
+			value = value.slice(2).replace("/", ":");
+		}
+		return value;
 	}
 }
 

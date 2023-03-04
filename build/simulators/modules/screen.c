@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022 Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Tools.
  * 
@@ -70,10 +70,12 @@ static void screen_end(xsMachine* the);
 static void screen_get_clut(xsMachine* the);
 static void screen_pixelsToBytes(xsMachine* the);
 static void screen_postMessage(xsMachine* the);
+static void screen_readLED(xsMachine* the);
 static void screen_send(xsMachine* the);
 static void screen_set_clut(xsMachine* the);
 static void screen_start(xsMachine* the);
 static void screen_stop(xsMachine* the);
+static void screen_writeLED(xsMachine* the);
 static void screen_get_pixelFormat(xsMachine* the);
 static void screen_get_rotation(xsMachine* the);
 static void screen_get_width(xsMachine* the);
@@ -275,12 +277,101 @@ void fxScreenKey(txScreen* screen, int kind, char* string, int modifiers, double
 	}
 }
 
+#ifdef mxInstrument
+
+static int32_t modInstrumentationSlotHeapSize(xsMachine *the)
+{
+	return the->currentHeapCount * sizeof(txSlot);
+}
+
+static int32_t modInstrumentationChunkHeapSize(xsMachine *the)
+{
+	return the->currentChunksSize;
+}
+
+static int32_t modInstrumentationKeysUsed(xsMachine *the)
+{
+	return the->keyIndex - the->keyOffset;
+}
+
+static int32_t modInstrumentationGarbageCollectionCount(xsMachine *the)
+{
+	return the->garbageCollectionCount;
+}
+
+static int32_t modInstrumentationModulesLoaded(xsMachine *the)
+{
+	return the->loadedModulesCount;
+}
+
+static int32_t modInstrumentationStackRemain(xsMachine *the)
+{
+	if (the->stackPeak > the->stack)
+		the->stackPeak = the->stack;
+	return (the->stackTop - the->stackPeak) * sizeof(txSlot);
+}
+
+#endif
+
+static uint16_t gSetupPending = 0;
+
+#if MODDEF_MAIN_ASYNC
+static void setStepDoneFulfilled(xsMachine *the)
+{
+	xsResult = xsGet(xsArg(0), xsID_default);
+	if (xsTest(xsResult) && xsIsInstanceOf(xsResult, xsFunctionPrototype))
+		xsCallFunction0(xsResult, xsGlobal);
+
+	xsCollectGarbage();
+
+	txScreen* screen = the->host;
+	screen->start(screen, 5);
+}
+
+static void setStepDoneRejected(xsMachine *the)
+{
+}
+#endif
+
+static void setStepDone(txMachine *the)
+{
+	gSetupPending -= 1;
+	if (gSetupPending)
+		return;
+
+	xsBeginHost(the);
+#if MODDEF_MAIN_ASYNC
+		xsVars(2);
+		xsResult = xsAwaitImport(((txPreparation *)xsPreparationAndCreation(NULL))->main, XS_IMPORT_ASYNC);
+		xsVar(0) = xsNewHostFunction(setStepDoneFulfilled, 1);
+		xsVar(1) = xsNewHostFunction(setStepDoneRejected, 1);
+		xsCall2(xsResult, xsID_then, xsVar(0), xsVar(1));
+#else	
+		xsVars(1);
+		xsVar(0) = xsAwaitImport(((txPreparation *)xsPreparationAndCreation(NULL))->main, XS_IMPORT_DEFAULT);
+		if (xsTest(xsVar(0))) {
+			if (xsIsInstanceOf(xsVar(0), xsFunctionPrototype)) {
+				xsCallFunction0(xsVar(0), xsGlobal);
+			}
+			else if (xsFindResult(xsVar(0), xsID_onLaunch)) {
+				xsCallFunction0(xsResult, xsVar(0));
+			}
+		}
+		xsCollectGarbage();
+#endif
+	xsEndHost(the);
+
+#if !MODDEF_MAIN_ASYNC
+	txScreen* screen = the->host;
+	screen->start(screen, 5);
+#endif
+}
 
 void fxScreenLaunch(txScreen* screen)
 {
 	static xsStringValue signature = PIU_DOT_SIGNATURE;
-	void* preparation = xsPreparation();
-	void* archive = (screen->archive) ? fxMapArchive(preparation, screen->archive, screen->archive, 4 * 1024, fxArchiveRead, fxArchiveWrite) : NULL;
+	txPreparation* preparation = xsPreparation();
+	void* archive = (screen->archive) ? fxMapArchive(C_NULL, preparation, screen->archive, 4 * 1024, fxArchiveRead, fxArchiveWrite) : NULL;
 	screen->machine = fxPrepareMachine(NULL, preparation, strrchr(signature, '.') + 1, screen, archive);
 	if (!screen->machine)
 		return;	
@@ -294,6 +385,12 @@ void fxScreenLaunch(txScreen* screen)
 	screen->rotation = -1;
 #ifdef mxInstrument
 	modInstrumentationInit();
+	modInstrumentationSetCallback(SlotHeapSize, (ModInstrumentationGetter)modInstrumentationSlotHeapSize);
+	modInstrumentationSetCallback(ChunkHeapSize, (ModInstrumentationGetter)modInstrumentationChunkHeapSize);
+	modInstrumentationSetCallback(KeysUsed, (ModInstrumentationGetter)modInstrumentationKeysUsed);
+	modInstrumentationSetCallback(GarbageCollectionCount, (ModInstrumentationGetter)modInstrumentationGarbageCollectionCount);
+	modInstrumentationSetCallback(ModulesLoaded, (ModInstrumentationGetter)modInstrumentationModulesLoaded);
+	modInstrumentationSetCallback(StackRemain, (ModInstrumentationGetter)modInstrumentationStackRemain);
 	((txMachine*)(screen->machine))->onBreak = debugBreak;
 	fxDescribeInstrumentation(screen->machine, screenInstrumentCount, screenInstrumentNames, screenInstrumentUnits);
 	fxScreenSampleInstrumentation(screen);
@@ -326,12 +423,16 @@ void fxScreenLaunch(txScreen* screen)
 		xsDefine(xsVar(0), xsID_pixelsToBytes, xsVar(1), xsDefault);
 		xsVar(1) = xsNewHostFunction(screen_postMessage, 1);
 		xsDefine(xsVar(0), xsID_postMessage, xsVar(1), xsDefault);
+		xsVar(1) = xsNewHostFunction(screen_readLED, 0);
+		xsDefine(xsVar(0), xsID_readLED, xsVar(1), xsDefault);
 		xsVar(1) = xsNewHostFunction(screen_send, 1);
 		xsDefine(xsVar(0), xsID_send, xsVar(1), xsDefault);
 		xsVar(1) = xsNewHostFunction(screen_start, 1);
 		xsDefine(xsVar(0), xsID_start, xsVar(1), xsDefault);
 		xsVar(1) = xsNewHostFunction(screen_stop, 0);
 		xsDefine(xsVar(0), xsID_stop, xsVar(1), xsDefault);
+		xsVar(1) = xsNewHostFunction(screen_writeLED, 1);
+		xsDefine(xsVar(0), xsID_writeLED, xsVar(1), xsDefault);
 		xsVar(1) = xsNewHostFunction(screen_get_pixelFormat, 0);
 		xsDefine(xsVar(0), xsID_pixelFormat, xsVar(1), xsIsGetter);
 		xsVar(1) = xsNewHostFunction(screen_set_pixelFormat, 0);
@@ -353,20 +454,37 @@ void fxScreenLaunch(txScreen* screen)
 		xsSet(xsVar(0), xsID_when, xsNumber(C_NAN));
 		xsSet(xsGlobal, xsID_screen, xsVar(0));
 
-		xsVar(1) = xsAwaitImport("main", XS_IMPORT_DEFAULT);
-		if (xsTest(xsVar(1))) {
-			if (xsIsInstanceOf(xsVar(1), xsFunctionPrototype)) {
-				xsCallFunction0(xsVar(1), xsGlobal);
-			}
-			else if (xsFindResult(xsVar(1), xsID_onLaunch)) {
-				xsCallFunction0(xsResult, xsVar(1));
-			}
-		}
+		txInteger scriptCount = preparation->scriptCount;
+		txScript* script = preparation->scripts;
+
+		xsVar(0) = xsNewHostFunction(setStepDone, 0);
+
+		gSetupPending = 1;
+
+		while (scriptCount--) {
+			if (0 == c_strncmp(script->path, "setup/", 6)) {
+				char path[C_PATH_MAX];
+				char *dot;
+
+				c_strcpy(path, script->path);
+				dot = c_strchr(path, '.');
+				if (dot)
+					*dot = 0;
+
+				xsResult = xsAwaitImport(path, XS_IMPORT_DEFAULT);
+				if (xsTest(xsResult) && xsIsInstanceOf(xsResult, xsFunctionPrototype)) {
+					gSetupPending += 1;
+					xsCallFunction1(xsResult, xsGlobal, xsVar(0));
+				}
+ 			}
+			script++;
+ 		}
 		
 		xsCollectGarbage();
 	}
 	xsEndHost(screen->machine);
-	(*screen->start)(screen, 5);
+	
+  setStepDone(screen->machine);
 }
 
 #ifdef mxInstrument
@@ -543,6 +661,12 @@ void screen_postMessage(xsMachine* the)
 		else
 			(*screen->post)(screen, xsToString(xsArg(0)), 0);
 	}
+}
+
+void screen_readLED(xsMachine* the)
+{
+	txScreen* screen = xsGetHostData(xsThis);
+	xsResult = (screen->flags & mxScreenLED) ? xsInteger(1) :  xsInteger(0);
 }
 
 void screen_send(xsMachine* the)
@@ -780,6 +904,16 @@ void screen_stop(xsMachine* the)
 	txScreen* screen = xsGetHostData(xsThis);
 	screen->flags &= ~mxScreenIdling;
 	xsSet(xsThis, xsID_when, xsNumber(C_NAN));
+}
+
+void screen_writeLED(xsMachine* the)
+{
+	txScreen* screen = xsGetHostData(xsThis);
+	if (xsTest(xsArg(0)))
+		screen->flags |= mxScreenLED;
+	else
+		screen->flags &= ~mxScreenLED;
+	(*screen->formatChanged)(screen);
 }
 
 void screen_get_clut(xsMachine* the)

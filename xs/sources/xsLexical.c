@@ -37,6 +37,7 @@
 
 #include "xsScript.h"
 
+static txU4 fxGetNextCode(txParser* parser);
 static txString fxGetNextDigits(txParser* parser, txString (*f)(txParser*, txString, txString), txString p, txString q, int empty);
 static txString fxGetNextDigitsB(txParser* parser, txString p, txString q);
 static txString fxGetNextDigitsD(txParser* parser, txString p, txString q, int* base);
@@ -110,10 +111,10 @@ static const txKeyword ICACHE_RODATA_ATTR gxStrictKeywords[XS_STRICT_KEYWORD_COU
 
 static txString fxUTF8Buffer(txParser* parser, txInteger character, txString string, txString limit)
 {
-	if (string + fxUTF8Length(character) > limit) {
+	if (string + mxStringByteLength(character) > limit) {
 		fxReportMemoryError(parser, parser->line, "buffer overflow");
 	}
-	return fxUTF8Encode(string, character);
+	return mxStringByteEncode(string, character);
 } 
 
 void fxCheckStrictKeyword(txParser* parser)
@@ -135,37 +136,53 @@ bail:
 
 void fxGetNextCharacter(txParser* parser)
 {
-	txU4 aResult;
-	txUTF8Sequence const *aSequence = NULL;
-	txInteger aSize;
-
 	parser->character = parser->lookahead;
 	if (parser->character != (txU4)C_EOF) {
-		aResult = (txU4)(*(parser->getter))(parser->stream);
-		if (aResult & 0x80) {  // According to UTF-8, aResult should be 1xxx xxxx when it is not a ASCII
-			if (aResult != (txU4)C_EOF) {
-				for (aSequence = gxUTF8Sequences; aSequence->size; aSequence++) {
-					if ((aResult & aSequence->cmask) == aSequence->cval)
-						break;
-				}
-				if (aSequence->size == 0) {
-					fxReportParserError(parser, parser->line, "invalid character %d", aResult);
-					aResult = (txU4)C_EOF;
-				}
-				else {
-					aSize = aSequence->size - 1;
-					while (aSize) {
-						aSize--;
-						aResult = (aResult << 6) | ((*(parser->getter))(parser->stream) & 0x3F);
-					}
-					aResult &= aSequence->lmask;
-				}
-			}
-			if (aResult == 0x110000)
-				aResult = 0;
+	#if mxCESU8
+		txU4 character = parser->surrogate;
+		if (character)
+			parser->surrogate = 0;
+		else
+			character = fxGetNextCode(parser);
+		if ((0x0000D800 <= character) && (character <= 0x0000DBFF)) {
+			txU4 surrogate = fxGetNextCode(parser);
+			if ((0x0000DC00 <= surrogate) && (surrogate <= 0x0000DFFF))
+				character = 0x00010000 + ((character & 0x000003FF) << 10) + (surrogate & 0x000003FF);
+			else
+				parser->surrogate = surrogate;
 		}
-		parser->lookahead = aResult;
+		parser->lookahead = character;
+	#else
+		parser->lookahead = fxGetNextCode(parser);
+	#endif
 	}
+}
+
+txU4 fxGetNextCode(txParser* parser)
+{
+	txU4 code = (txU4)(*(parser->getter))(parser->stream);
+	if ((code & 0x80) && (code != (txU4)C_EOF)) {
+		txUTF8Sequence const *sequence = NULL;
+		for (sequence = gxUTF8Sequences; sequence->size; sequence++) {
+			if ((code & sequence->cmask) == sequence->cval)
+				break;
+		}
+		if (sequence->size == 0) {
+			fxReportParserError(parser, parser->line, "invalid character %d", code);
+			code = (txU4)C_EOF;
+		}
+		else {
+			txS4 size = sequence->size - 1;
+			while (size) {
+				size--;
+				code = (code << 6) | ((*(parser->getter))(parser->stream) & 0x3F);
+			}
+			code &= sequence->lmask;
+		}
+		if (code == 0x000110000)
+			code = 0;
+	}
+	return code;
 }
 
 txString fxGetNextDigits(txParser* parser, txString (*f)(txParser*, txString, txString), txString p, txString q, int empty)
@@ -589,7 +606,7 @@ void fxGetNextRegExp(txParser* parser, txU4 c)
 	parser->modifierLength = mxPtrDiff(p - parser->buffer);
 	parser->modifier = fxNewParserString(parser, parser->buffer, parser->modifierLength);
 	if (!fxCompileRegExp(C_NULL, parser->string, parser->modifier, C_NULL, C_NULL, parser->buffer, parser->bufferSize))
-		fxReportParserError(parser, parser->line, parser->buffer);
+		fxReportParserError(parser, parser->line, "%s", parser->buffer);
 	parser->token = XS_TOKEN_REGEXP;
 }
 
@@ -1267,18 +1284,16 @@ void fxGetNextTokenAux(txParser* parser)
 					else if (!c_strncmp(p, "# sourceMappingURL=", 19) || !c_strncmp(p, "@ sourceMappingURL=", 19)) {
 						p += 19;
 						q = p;
-						c = *q++;
-						while ((c != 0) && (c != 10) && (c != 13))
-							c = *q++;
+						while (((c = *q)) && (c != 10) && (c != 13))
+							q++;
 						*q = 0;
 						parser->name = fxNewParserString(parser, p, mxPtrDiff(q - p));
 					}
 					else if (!c_strncmp(p, "# sourceURL=", 12) || !c_strncmp(p, "@ sourceURL=", 12)) {
 						p += 12;
 						q = p;
-						c = *q++;
-						while ((c != 0) && (c != 10) && (c != 13))
-							c = *q++;
+						while (((c = *q)) && (c != 10) && (c != 13))
+							q++;
 						*q = 0;
 						parser->source = fxNewParserSymbol(parser, p);
 					}
@@ -1643,22 +1658,22 @@ txString fxGetNextEntity(txParser* parser, txString p, txString q)
 {
 	txString r = p;
 	txU4 t = 0;
-	*p++ = '&';
+    if (p < q) *p++ = '&';
 	fxGetNextCharacter(parser);
 	if (parser->character == '#') {
-		*p++ = '#';
+		if (p < q) *p++ = '#';
 		fxGetNextCharacter(parser);
 		if (parser->character == 'x') {
-			*p++ = 'x';
+			if (p < q) *p++ = 'x';
 			fxGetNextCharacter(parser);
 			while (fxGetNextStringX(parser->character, &t)) {
-				*p++ = parser->character;
+				if (p < q) *p++ = parser->character;
 				fxGetNextCharacter(parser);
 			}
 		}
 		else {
 			while (fxGetNextStringD(parser->character, &t)) {
-				*p++ = parser->character;
+				if (p < q) *p++ = parser->character;
 				fxGetNextCharacter(parser);
 			}
 		}
@@ -1666,17 +1681,18 @@ txString fxGetNextEntity(txParser* parser, txString p, txString q)
 	else {
 		txEntity* entity = C_NULL;
 		int c = parser->character;
-		while ((('0' <= c) && (c <= '9')) || (('A' <= c) && (c <= 'Z')) || (('a' <= c) && (c <= 'z'))) {
-			*p++ = c;
+		while ((p < q) && ((('0' <= c) && (c <= '9')) || (('A' <= c) && (c <= 'Z')) || (('a' <= c) && (c <= 'z')))) {
+			if (p < q) *p++ = c;
 			fxGetNextCharacter(parser);
 			c = parser->character;
 		}
 		*p = 0;
-		entity = (txEntity*)bsearch(r + 1, gxEntities, XS_ENTITIES_COUNT, sizeof(txEntity), fxCompareEntities);
+        if (r < q)
+            entity = (txEntity*)bsearch(r + 1, gxEntities, XS_ENTITIES_COUNT, sizeof(txEntity), fxCompareEntities);
 		t = entity ? entity->value : 0;
 	}
 	if (parser->character == ';') {
-		*p++ = ';';
+		if (p < q) *p++ = ';';
 		fxGetNextCharacter(parser);
 		if (t)
 			p = fxUTF8Buffer(parser, t, r, q);

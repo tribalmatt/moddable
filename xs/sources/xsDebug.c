@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2017  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022  Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -37,11 +37,20 @@
 
 #include "xsAll.h"
 
+#if MODDEF_XS_TEST
+	#undef MODDEF_XS_XSBUG_HOOKS
+	#define MODDEF_XS_XSBUG_HOOKS 1
+#endif
+
 #if defined(DEBUG_EFM)
 char _lastDebugStrBuffer[256];
 char _debugStrBuffer[256];
 #endif
 static void fxVReportException(void* console, txString thePath, txInteger theLine, txString theFormat, c_va_list theArguments);
+
+#if defined(mxInstrument) || defined (mxDebug)	
+static const char gxHexaDigits[] ICACHE_FLASH_ATTR = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+#endif
 
 #ifdef mxDebug
 static void fxClearAllBreakpoints(txMachine* the);
@@ -144,6 +153,8 @@ enum {
 	XS_STEP_INSIDE_TAG,
 	XS_STEP_OUTSIDE_TAG,
 	XS_TOGGLE_TAG,
+	XS_START_PROFILING_TAG,
+	XS_STOP_PROFILING_TAG,
 	XS_UNKNOWN_TAG
 };
 
@@ -153,8 +164,6 @@ enum {
 	XS_PATH_ATTRIBUTE,
 	XS_UNKNOWN_ATTRIBUTE
 };
-
-static const char gxHexaDigits[] ICACHE_FLASH_ATTR = "0123456789ABCDEF";
 
 void fxCheck(txMachine* the, txString thePath, txInteger theLine)
 {
@@ -214,15 +223,15 @@ void fxDebugCommand(txMachine* the)
 	}
 	mxHostInspectors.value.list.first = C_NULL;
 	mxHostInspectors.value.list.last = C_NULL;
-#if MODDEF_XS_TEST
+#if MODDEF_XS_XSBUG_HOOKS
 	if (the->debugTag == XS_IMPORT_TAG)
 		fxQueueJob(the, 2, C_NULL);
 	else if (the->debugTag == XS_SCRIPT_TAG)
-		fxQueueJob(the, 4, C_NULL);
+		fxQueueJob(the, 6, C_NULL);
 #endif
 }
 
-#if MODDEF_XS_TEST
+#if MODDEF_XS_XSBUG_HOOKS
 void fxDebugImport(txMachine* the, txSlot* module, txString path)
 {
 	if (!fxIsConnected(the))
@@ -241,7 +250,7 @@ void fxDebugImport(txMachine* the, txSlot* module, txString path)
 			break;
 	}
     if (the->debugTag == XS_MODULE_TAG){
-        mxRunCount(4);
+        mxRunCount(6);
         mxPop();
     }
 }
@@ -271,6 +280,9 @@ void fxDebugLoop(txMachine* the, txString path, txInteger line, txString message
 #ifdef mxInstrument
 	if (the->onBreak)
 		(the->onBreak)(the, 1);
+#endif
+#if defined(mxInstrument) || defined(mxProfile)
+	fxSuspendProfiler(the);
 #endif
 
 	fxEchoStart(the);
@@ -312,6 +324,9 @@ void fxDebugLoop(txMachine* the, txString path, txInteger line, txString message
 	mxHostInspectors.value.list.first = C_NULL;
 	mxHostInspectors.value.list.last = C_NULL;
 
+#if defined(mxInstrument) || defined(mxProfile)
+	fxResumeProfiler(the);
+#endif
 #ifdef mxInstrument
 	if (the->onBreak)
 		(the->onBreak)(the, 0);
@@ -622,15 +637,19 @@ void fxDebugParseTag(txMachine* the, txString name)
 		the->debugTag = XS_SET_ALL_BREAKPOINTS_TAG;
 	else if (!c_strcmp(name, "set-breakpoint"))
 		the->debugTag = XS_SET_BREAKPOINT_TAG;
+	else if (!c_strcmp(name, "start-profiling"))
+		the->debugTag = XS_START_PROFILING_TAG;
 	else if (!c_strcmp(name, "step"))
 		the->debugTag = XS_STEP_TAG;
 	else if (!c_strcmp(name, "step-inside"))
 		the->debugTag = XS_STEP_INSIDE_TAG;
 	else if (!c_strcmp(name, "step-outside"))
 		the->debugTag = XS_STEP_OUTSIDE_TAG;
+	else if (!c_strcmp(name, "stop-profiling"))
+		the->debugTag = XS_STOP_PROFILING_TAG;
 	else if (!c_strcmp(name, "toggle"))
 		the->debugTag = XS_TOGGLE_TAG;
-#if MODDEF_XS_TEST
+#if MODDEF_XS_XSBUG_HOOKS
 	else if (!c_strcmp(name, "import"))
 		the->debugTag = XS_IMPORT_TAG;
 	else if (!c_strcmp(name, "module"))
@@ -670,6 +689,9 @@ void fxDebugPopTag(txMachine* the)
 	case XS_SET_BREAKPOINT_TAG:
 		the->debugExit |= 1;
 		break;
+	case XS_START_PROFILING_TAG:
+		the->debugExit |= 1;
+		break;
 	case XS_STEP_TAG:
 		the->debugExit |= 2;
 		break;
@@ -679,16 +701,17 @@ void fxDebugPopTag(txMachine* the)
 	case XS_STEP_OUTSIDE_TAG:
 		the->debugExit |= 2;
 		break;
+	case XS_STOP_PROFILING_TAG:
+		the->debugExit |= 1;
+		break;
 	case XS_TOGGLE_TAG:
 		break;
-#if MODDEF_XS_TEST
+#if MODDEF_XS_XSBUG_HOOKS
 	case XS_IMPORT_TAG:
 		the->debugExit |= 2;
 		break;
 	case XS_MODULE_TAG:
 	case XS_SCRIPT_TAG:
-		mxPop();
-		mxPop();
 		the->debugExit |= 2;
 		break;
 #endif
@@ -732,6 +755,9 @@ void fxDebugPushTag(txMachine* the)
 	case XS_SET_BREAKPOINT_TAG:
 		fxSetBreakpoint(the, the->pathValue, the->lineValue);
 		break;
+	case XS_START_PROFILING_TAG:
+		fxStartProfiling(the);
+		break;
 	case XS_STEP_TAG:
 		fxStep(the);
 		break;
@@ -741,6 +767,9 @@ void fxDebugPushTag(txMachine* the)
 	case XS_STEP_OUTSIDE_TAG:
 		fxStepOutside(the);
 		break;
+	case XS_STOP_PROFILING_TAG:
+		fxStopProfiling(the, C_NULL);
+		break;
 	case XS_TOGGLE_TAG:
 		fxToggle(the, (txSlot*)the->idValue);
 		fxEchoStart(the);
@@ -749,8 +778,8 @@ void fxDebugPushTag(txMachine* the)
 		fxListModules(the);
 		fxEchoStop(the);
 		break;
-#if MODDEF_XS_TEST
-	case XS_IMPORT_TAG:
+#if MODDEF_XS_XSBUG_HOOKS
+	case XS_IMPORT_TAG: 
 		/* THIS */
 		mxPushUndefined();
 		/* FUNCTION */
@@ -763,6 +792,7 @@ void fxDebugPushTag(txMachine* the)
 		break;
 	case XS_MODULE_TAG:
 	case XS_SCRIPT_TAG:
+		fxCollectGarbage(the);
 		/* THIS */
 		mxPushUndefined();
 		/* FUNCTION */
@@ -776,10 +806,10 @@ void fxDebugPushTag(txMachine* the)
 			mxPushSlot(the->debugModule);
 		else
 			mxPushUndefined();
-		mxPushUndefined();
-		fxStringBuffer(the, the->stack, C_NULL, 256);
 		mxPushStringC(the->pathValue);
 		mxPushInteger(the->lineValue);
+		mxPushUndefined();
+		fxStringBuffer(the, the->stack, C_NULL, 256);
 		mxPushInteger(256);
 		mxPushInteger(0);
 		break;
@@ -789,19 +819,19 @@ void fxDebugPushTag(txMachine* the)
 
 void fxDebugScriptCDATA(txMachine* the, char c)
 {
-#if MODDEF_XS_TEST
+#if MODDEF_XS_XSBUG_HOOKS
 	if ((the->debugTag == XS_MODULE_TAG) || (the->debugTag == XS_SCRIPT_TAG)) {
-		txString string = the->stack[4].value.string;
+		txString string = the->stack[2].value.string;
 		txInteger size = the->stack[1].value.integer;
 		txInteger offset = the->stack[0].value.integer;
 		if (offset == size) {
 			txString result = (txString)fxRenewChunk(the, string, size + 256);
 			if (!result) {
 				result = (txString)fxNewChunk(the, size + 256);
-				string = the->stack[4].value.string;
+				string = the->stack[2].value.string;
 				c_memcpy(result, string, size);
 			}
-			the->stack[4].value.string = string = result;
+			the->stack[2].value.string = string = result;
 			the->stack[1].value.integer = size + 256;
 		}
 		string[offset++] = c;
@@ -1024,9 +1054,6 @@ void fxEchoInstance(txMachine* the, txSlot* theInstance, txInspectorNameList* th
 			if ((aProperty->kind == XS_HOME_KIND) && (aProperty->value.home.object))
 				fxEchoPropertyInstance(the, theList, "(home)", -1, C_NULL, XS_NO_ID, aProperty->flag, aProperty->value.home.object);
 			aProperty = aProperty->next;
-		#ifdef mxProfile
-			aProperty = aProperty->next;
-		#endif
 			break;
 		case XS_ARRAY_BUFFER_KIND:
 			aProperty = aProperty->next;
@@ -1096,6 +1123,11 @@ void fxEchoInstance(txMachine* the, txSlot* theInstance, txInspectorNameList* th
 			aProperty = aProperty->next;
 			fxEchoProperty(the, aProperty, theList, "(export)", -1, C_NULL);
 			aProperty = aProperty->next;
+			break;
+		case XS_PROGRAM_KIND:
+			aSlot = aProperty->value.module.realm;
+			fxEchoProperty(the, mxRealmGlobal(aSlot), theList, "(globals)", -1, C_NULL);
+			fxEchoProperty(the, mxOwnModules(aSlot), theList, "(modules)", -1, C_NULL);
 			break;
 		case XS_SET_KIND:
 			aProperty = aProperty->next;
@@ -1606,16 +1638,16 @@ void fxEchoString(txMachine* the, txString theString)
 		 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,	/* EX                    */
 		 1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1 	/* FX                    */
 	};
-	unsigned char tmp;
-	unsigned char* src;
-	unsigned char* dst;
-	unsigned char* start;
-	unsigned char* stop;
+	txU1 tmp;
+	txU1* src;
+	txU1* dst;
+	txU1* start;
+	txU1* stop;
 
-	src = (unsigned char*)theString;
-	dst = (unsigned char*)the->echoBuffer + the->echoOffset;
-	start = (unsigned char*)the->echoBuffer;
-	stop = (unsigned char*)the->echoBuffer + sizeof(the->echoBuffer) - 1;
+	src = (txU1*)theString;
+	dst = (txU1*)the->echoBuffer + the->echoOffset;
+	start = (txU1*)the->echoBuffer;
+	stop = (txU1*)the->echoBuffer + sizeof(the->echoBuffer) - 1;
 	while ((tmp = c_read8(src))) {
 		src++;
 		if (dst + 6 > stop) {
@@ -1623,6 +1655,17 @@ void fxEchoString(txMachine* the, txString theString)
 			fxSend(the, 1);
 			dst = start;
 		}
+#if mxCESU8
+		if (tmp & 0x80) {
+			txInteger character;
+			src = (txU1*)fxCESU8Decode((txString)src - 1, &character);
+			if (character > 128) {
+				dst = (txU1*)fxUTF8Encode((txString)dst, character);
+				continue;
+			}
+			tmp = (txU1)character;
+		}
+#endif
 		if (c_read8(gxEscape + tmp))
 			*dst++ = tmp;
 		else {
@@ -1812,26 +1855,39 @@ void fxListModules(txMachine* the)
 	txSlot* moduleMap = mxModuleMap(realm);
 	txSlot* instance = fxGetInstance(the, moduleMap);
 	txSlot* instanceInspector = fxToInstanceInspector(the, instance);
-	txSlot* module = mxOwnModules(realm)->value.reference->next;
+	txSlot* modules = mxOwnModules(realm)->value.reference;
+	txSlot* module;
 	fxEcho(the, "<grammar>");
-	fxEcho(the, "<node");
-	if (instanceInspector)
-		fxEchoFlags(the, "-", moduleMap->flag);
-	else
-		fxEchoFlags(the, "+", moduleMap->flag);
-	fxEcho(the, " name=\"(map)\"");
-	fxEchoAddress(the, instance);
-	if (instanceInspector) {
-		fxEcho(the, ">");
-		fxEchoInstance(the, instance, &aList);
-		fxEcho(the, "</node>");
+	if (instance->next) {
+		fxEcho(the, "<node");
+		if (instanceInspector)
+			fxEchoFlags(the, "-", moduleMap->flag);
+		else
+			fxEchoFlags(the, "+", moduleMap->flag);
+		fxEcho(the, " name=\"(map)\"");
+		fxEchoAddress(the, instance);
+		if (instanceInspector) {
+			fxEcho(the, ">");
+			fxEchoInstance(the, instance, &aList);
+			fxEcho(the, "</node>");
+		}
+		else
+			fxEcho(the, "/>");
 	}
-	else
-		fxEcho(the, "/>");
+	module = modules->next;
 	while (module) {
         if (mxIsReference(module))
             fxEchoModule(the, module, &aList);
 		module = module->next;
+	}
+	modules = modules->value.instance.prototype;
+	if (modules) {
+		module = modules->next;
+		while (module) {
+			if (mxIsReference(module))
+				fxEchoModule(the, module, &aList);
+			module = module->next;
+		}
 	}
 	fxEcho(the, "</grammar>");
 }
@@ -1864,6 +1920,7 @@ void fxLogout(txMachine* the)
 {
 	if (!fxIsConnected(the))
 		return;
+	fxStopProfiling(the, C_NULL);
 	fxDisconnect(the);
 }
 
@@ -2136,6 +2193,14 @@ void fxReportWarning(txMachine* the, txString thePath, txInteger theLine, txStri
 #endif
 }
 
+txID fxGenerateProfileID(void* console)
+{
+	txMachine* the = console;
+	txID id = the->profileID;
+	the->profileID++;
+	return id;
+}
+
 void fxGenerateTag(void* console, txString buffer, txInteger bufferSize, txString path)
 {
 	txMachine* the = console;
@@ -2362,4 +2427,284 @@ void fxSampleInstrumentation(txMachine* the, txInteger count, txInteger* values)
 	c_printf("\n");
 #endif
 }
+
+#if defined(modMicrosecondsInstrumentation) || defined(modMicroseconds)
+	typedef txU4 txMicroseconds;
+#else
+	typedef txU8 txMicroseconds;
 #endif
+
+#define mxProfilerSampleCount 8
+
+typedef struct sxProfiler txProfiler;
+struct sxProfiler {
+	txMicroseconds when;
+	txMicroseconds former;
+//	txMicroseconds start;
+	txMicroseconds stop;
+	txU4 interval;
+	txSize recordCount;
+	txByte* records;
+	txSize sampleIndex;
+	txSize sampleSize;
+	txID* samples;
+	txU4 deltas[mxProfilerSampleCount];
+};
+
+static void fxEchoUnsigned(txMachine* the, txUnsigned value, txInteger radix);
+static txID fxFrameToProfilerID(txMachine* the, txSlot* frame);
+static txMicroseconds fxGetMicroSeconds();
+static void fxSendProfilerRecord(txMachine* the, txSlot* frame, txID id, txSlot* code);
+static void fxSendProfilerSamples(txMachine* the, txProfiler* profiler);
+static void fxSendProfilerTime(txMachine* the, txString name, txMicroseconds when);
+
+void fxCheckProfiler(txMachine* the, txSlot* frame)
+{
+	txProfiler* profiler = the->profiler;
+	if (!profiler)
+		return;
+	txMicroseconds when = profiler->when;
+	txMicroseconds time = fxGetMicroSeconds();
+	if (when <= time) {
+		txSize sampleIndex = profiler->sampleIndex;
+		txSize sampleSize = profiler->sampleSize;
+		txID* samples = profiler->samples + (sampleIndex * sampleSize);
+		txU4 interval = profiler->interval;
+		profiler->deltas[sampleIndex] = (txU4)(time - profiler->former);
+		profiler->former = time;
+		profiler->when = time + interval - (time % interval);
+		if (!frame) {
+			frame = the->frame;
+			if (frame)
+				*samples++ = 1;
+		}
+		while (frame) {
+			txID id = fxFrameToProfilerID(the, frame);
+			if (id)
+				*samples++ = id;
+			frame = frame->next;
+		}
+		*samples++ = 0;
+		sampleIndex++;
+		if (sampleIndex == mxProfilerSampleCount) {
+			fxSendProfilerSamples(the, profiler);
+			sampleIndex = 0;
+		}
+		profiler->sampleIndex = sampleIndex;
+	}
+}
+
+void fxCreateProfiler(txMachine* the)
+{
+	txProfiler* profiler = the->profiler = c_malloc(sizeof(txProfiler));
+	if (profiler == C_NULL)
+		fxAbort(the, XS_NOT_ENOUGH_MEMORY_EXIT);
+	profiler->interval = 1250;
+	profiler->former = fxGetMicroSeconds();
+	profiler->when = profiler->former + profiler->interval;
+	
+	profiler->recordCount = 128;
+	profiler->records = c_calloc(1, profiler->recordCount);
+	if (profiler->records == C_NULL)
+		fxAbort(the, XS_NOT_ENOUGH_MEMORY_EXIT);
+
+	profiler->sampleIndex = 0;
+	profiler->sampleSize = (the->stackTop - the->stackBottom) >> 3;
+	profiler->samples = (txID*)c_malloc((size_t)(mxProfilerSampleCount * profiler->sampleSize * sizeof(txID)));
+	if (profiler->samples == C_NULL)
+		fxAbort(the, XS_NOT_ENOUGH_MEMORY_EXIT);
+
+	fxSendProfilerTime(the, "start", profiler->former);
+	fxSendProfilerRecord(the, C_NULL, 0, C_NULL);
+	fxSendProfilerRecord(the, C_NULL, 1, C_NULL);
+	profiler->records[0] = 0x03;
+}
+
+void fxDeleteProfiler(txMachine* the, void* stream)
+{
+	txProfiler* profiler = the->profiler;
+	fxSendProfilerTime(the, "stop", fxGetMicroSeconds());
+	c_free(profiler->samples);
+	c_free(profiler->records);
+	c_free(profiler);
+	the->profiler = C_NULL;
+}
+
+#ifdef mxDebug
+void fxEchoUnsigned(txMachine* the, txUnsigned value, txInteger radix)
+{
+	char buffer[256];
+	char *p = &buffer[sizeof(buffer) - 1];
+	*p-- = 0;
+	do {
+		*p-- = c_read8(gxHexaDigits + (value % radix));
+		value /= radix;
+	} while (value);
+	fxEcho(the, p + 1);
+}
+#endif
+
+txID fxFrameToProfilerID(txMachine* the, txSlot* frame)
+{
+	txProfiler* profiler = the->profiler;
+	txSlot* function = frame + 3;
+	txSlot* code = C_NULL;
+	txID id = XS_NO_ID;
+	if (function->kind == XS_REFERENCE_KIND) {
+		function = function->value.reference;
+		if (mxIsFunction(function)) {
+			code = mxFunctionInstanceCode(function);
+			id = mxFunctionInstanceHome(function)->ID;
+		}
+	}
+#ifdef mxHostFunctionPrimitive
+	else if (function->kind == XS_HOST_FUNCTION_KIND)
+		id = function->value.hostFunction.profileID;
+#endif
+	if (id != XS_NO_ID) {		
+		txInteger recordIndex = id >> 3;
+		txInteger recordMask = 1 << (id & 0x07);
+		txInteger recordCount = profiler->recordCount;
+		if (recordIndex >= recordCount) {
+			while (recordIndex >= recordCount)
+				recordCount += 128;
+			profiler->records = c_realloc(profiler->records, recordCount);
+			if (profiler->records == C_NULL)
+				fxAbort(the, XS_NOT_ENOUGH_MEMORY_EXIT);
+			c_memset(profiler->records + profiler->recordCount, 0, (recordCount - profiler->recordCount));
+			profiler->recordCount = recordCount;
+		}
+		else if (profiler->records[recordIndex] & recordMask)
+			return id;
+		profiler->records[recordIndex] |= recordMask;
+		fxSendProfilerRecord(the, frame, id, code);
+		return id;
+	}
+	return 0;
+}
+
+txMicroseconds fxGetMicroSeconds()
+{
+#if defined(modMicrosecondsInstrumentation)
+	return modMicrosecondsInstrumentation();
+#elif defined(modMicroseconds)
+	return modMicroseconds();
+#else
+	c_timeval tv;
+	c_gettimeofday(&tv, NULL);
+	return (tv.tv_sec * 1000000ULL) + tv.tv_usec;
+#endif
+}
+
+void fxResumeProfiler(txMachine* the)
+{
+	txProfiler* profiler = the->profiler;
+	if (!profiler)
+		return;
+	txMicroseconds delta = fxGetMicroSeconds();
+	fxSendProfilerTime(the, "resume", delta);
+	delta -= profiler->stop;
+	profiler->when += delta;
+	profiler->former += delta;
+}
+
+void fxSendProfilerRecord(txMachine* the, txSlot* frame, txID id, txSlot* code)
+{
+#ifdef mxDebug
+	if (fxIsConnected(the)) {
+		fxEchoStart(the);
+		if (id == 0) {
+			fxEcho(the, "<pr name=\"(host)\" value=\"0\"");
+		}
+		else if (id == 1) {
+			fxEcho(the, "<pr name=\"(gc)\" value=\"1\"");
+		}
+		else {
+			fxEcho(the, "<pr name=\"");
+			fxEchoFrameName(the, frame);
+			fxEcho(the, "\" value=\"");
+			fxEchoInteger(the, id);
+			fxEcho(the, "\"");
+		}
+		if (code) {
+			if ((code->kind == XS_CODE_KIND) || (code->kind == XS_CODE_X_KIND)) {
+				txByte* p = code->value.code.address + 2;
+				if (*p == XS_CODE_FILE) {
+					txID file;
+					txS2 line;
+					p++;
+					mxDecodeID(p, file);
+					p++;
+					mxDecode2(p, line);
+					fxEchoPathLine(the, fxGetKeyName(the, file), line);
+				}
+			}
+		}
+		fxEcho(the, "/>");
+		fxEchoStop(the);
+	}
+#endif
+}
+
+void fxSendProfilerSamples(txMachine* the, txProfiler* profiler)
+{
+#ifdef mxDebug
+	if (fxIsConnected(the)) {
+		txID* samples = profiler->samples;
+		txSize sampleSize = profiler->sampleSize;
+		txSize sampleIndex = 0;
+		txID* ids;
+		txID id;
+		fxEchoStart(the);
+		fxEcho(the, "<ps>");
+		for (;;) {
+			fxEchoUnsigned(the, profiler->deltas[sampleIndex], 36);
+			ids = samples;
+			while ((id = *ids++)) {
+				fxEcho(the, ",");
+				fxEchoUnsigned(the, id, 36);
+			}
+			sampleIndex++;
+			if (sampleIndex < mxProfilerSampleCount) 
+				fxEcho(the, ",0.");
+			else {
+				fxEcho(the, ",0</ps>");
+				break;
+			}
+			samples += sampleSize;
+		}
+		fxEchoStop(the);
+	}
+#endif
+}
+
+void fxSendProfilerTime(txMachine* the, txString name, txMicroseconds when)
+{
+#ifdef mxDebug
+	if (fxIsConnected(the)) {
+		int shift;
+		fxEchoStart(the);
+		fxEcho(the, "<pt name=\"");
+		fxEchoString(the, name);
+		fxEcho(the, "\" value=\"@");
+		shift = (8 * sizeof(when)) - 4;
+		while (shift >= 0) {
+			fxEchoCharacter(the, c_read8(gxHexaDigits + ((when >> shift) & 0x0F)));
+			shift -= 4;
+		}
+		fxEcho(the, "\"/>");
+		fxEchoStop(the);
+	}
+#endif
+}
+
+void fxSuspendProfiler(txMachine* the)
+{
+	txProfiler* profiler = the->profiler;
+	if (!profiler)
+		return;
+	profiler->stop = fxGetMicroSeconds();
+	fxSendProfilerTime(the, "suspend", profiler->stop);
+}
+
+#endif /* mxInstrument */

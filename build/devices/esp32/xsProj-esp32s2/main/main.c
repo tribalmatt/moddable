@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2020  Moddable Tech, Inc.
+ * Copyright (c) 2016-2022  Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -95,8 +95,6 @@ static xsMachine *gThe;		// the main XS virtual machine running
 
 static void debug_task(void *pvParameter)
 {
-	extern uint8_t fxIsConnected(xsMachine* the);
-
 	while (true) {
 		uart_event_t event;
 
@@ -144,7 +142,7 @@ void setup(void)
 
 	modRunMachineSetup(gThe);
 
-#if CONFIG_TASK_WDT
+#if CONFIG_ESP_TASK_WDT
 	esp_task_wdt_add(NULL);
 #endif
 }
@@ -156,6 +154,7 @@ void loop_task(void *pvParameter)
 	while (true) {
 		modTimersExecute();
 		modMessageService(gThe, modTimersNext());
+		modInstrumentationAdjust(Turns, +1);
 	}
 }
 
@@ -168,7 +167,7 @@ void modLog_transmit(const char *msg)
 {
 	uint8_t c;
 
-#if mxDebug
+#ifdef mxDebug
 	if (gThe) {
 		while (0 != (c = c_read8(msg++)))
 			fx_putc(gThe, c);

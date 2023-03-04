@@ -1,9 +1,6 @@
 # Networking
-
-Copyright 2017-2021 Moddable Tech, Inc.<BR>
-Revised: November 16, 2021
-
-**Warning**: These notes are preliminary. Omissions and errors are likely. If you encounter problems, please ask for assistance.
+Copyright 2017-2022 Moddable Tech, Inc.<BR>
+Revised: March 8, 2022
 
 ## Table of Contents
 
@@ -445,6 +442,16 @@ server.close();
 
 ***
 
+### `detach(connection)`
+
+The `detach` function accepts an active HTTP connection of the server instance and removes it from the server, returning the socket instance of the connection. This is useful for implementing an HTTP endpoint that accepts both HTTP and WebSocket connections by allowing the existing connection of HTTP server to be handed off to the WebSocket server.
+
+```js
+server.detach(connnection);
+```
+
+***
+
 ### `callback(message, val1, val2)`
 
 The user of the server receives status information through the callback function. The callback receives messages and, for some messages, additional data values. Positive `message` values indicate normal operation and negative `message` values indicate an error.
@@ -665,7 +672,7 @@ The WebSocket server implementation is designed for sending and receiving small 
 
 ### `constructor(dictionary)`
 
-A new WebSocket `Server` is configured using a dictionary of properties. The dictionary is a super-set of the `Listener` dictionary. The server is a Socket Listener. If no port is provided in the dictionary, port 80 is used.
+A new WebSocket `Server` is configured using a dictionary of properties. The dictionary is a super-set of the `Listener` dictionary. The server is a Socket Listener. If no port is provided in the dictionary, port 80 is used. If port is set to `null`, no listener is created which is useful when sharing a listener with an http server (see `attach` below).
 
 At this time, the WebSocket `Server` does not define any additional properties for the dictionary.
 
@@ -684,6 +691,14 @@ The `close` function immediately terminates the WebSocket server listener, freei
 ```js
 ws.close();
 ```
+
+***
+
+### `attach(socket)`
+
+The `attach` function creates a new incoming WebSockets connection from the provided socket. The server issues the `Server.connect` callback and then performs the WebSockets handshake. The status line has been read from the socket, but none of the HTTP headers have been read as these are required to complete the handshake. 
+
+See the [httpserverwithwebsockets](../../examples/network/http/httpserverwithwebsockets/main.js) for an example of sharing a single listener socket between the HTTP and WebSockets servers.
 
 ***
 

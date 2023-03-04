@@ -35,18 +35,6 @@
  *       limitations under the License.
  */
 
-// ASSETS
-
-import {
-	buttonsSkin,
-	codeSkin,
-	codeStyle,
-	glyphsSkin,
-	paneBorderSkin,
-	paneHeaderSkin,
-	paneHeaderStyle,
-} from "assets";
-
 // BEHAVIORS
 
 import { 
@@ -107,14 +95,14 @@ class ConsoleCodeBehavior extends CodeBehavior {
 	onMouseMoved(code, x, y) {
 		let bounds = code.bounds;
 		let offset = code.findLineBreak(code.hitOffset(x - bounds.x, y - bounds.y), false);
-		let color = this.colors.find(color => color.offset == offset);
+		let color = this.colors.find(color => color.offset == offset && color.path !== undefined);
 		application.cursor = color ? cursors.link :  cursors.iBeam;
 	}
 	onTouchEnded(code, id, x, y, ticks) {
 		super.onTouchEnded(code, id, x, y, ticks);
 		if ((this.mode == 0) && (code.selectionLength == 0)) {
 			let offset = code.findLineBreak(code.selectionOffset, false);
-			let color = this.colors.find(color => color.offset == offset);
+			let color = this.colors.find(color => color.offset == offset && color.path !== undefined);
 			if (color) {
 				model.selectFile(color.path, { line:color.line });
 			}
@@ -127,7 +115,7 @@ class ConsoleCodeBehavior extends CodeBehavior {
 
 class ConsoleHeaderBehavior extends RowBehavior {
 	changeArrowState(row, state) {
-		row.first.state = state;
+		row.first.variant = state;
 	}
 	onDisplaying(row) {
 		let divider = row.container.container.next;
@@ -165,22 +153,22 @@ export var ConsolePane = Container.template($ => ({
 			left:0, right:0, top:0, bottom:0,
 			contents: [
 				Scroller($, {
-					left:0, right:0, top:27, bottom:0, clip:true, active:true, Behavior:ScrollerBehavior,
+					left:0, right:0, top:27, bottom:0, skin:skins.background, clip:true, active:true, Behavior:ScrollerBehavior,
 					contents: [
-						Code($, { left:0, top:0, skin:codeSkin, style:codeStyle, active:true, selectable:true, Behavior:ConsoleCodeBehavior }),
+						Code($, { left:0, top:0, skin:skins.code, style:styles.code, active:true, selectable:true, Behavior:ConsoleCodeBehavior }),
 						HorizontalScrollbar($, {}),
 						VerticalScrollbar($, {}),
 					],
 				}),
-				Content($, { left:0, right:0, top:26, height:1, skin:paneBorderSkin, }),
+				Content($, { left:0, right:0, top:26, height:1, skin:skins.paneBorder, }),
 			],
 		}),
 		Row($, {
-			left:0, right:0, top:0, height:26, skin:paneHeaderSkin, active:true, Behavior:ConsoleHeaderBehavior,
+			left:0, right:0, top:0, height:26, skin:skins.paneHeader, state:1, active:true, Behavior:ConsoleHeaderBehavior,
 			contents: [
-				Content($, { width:30, height:26, skin:glyphsSkin, variant:0 }),
+				Content($, { width:30, height:26, skin:skins.glyphs }),
 				Label($, { 
-					left:0, right:0, style:paneHeaderStyle, string:"LOG",
+					left:0, right:0, style:styles.paneHeader, string:"LOG",
 					Behavior: class extends ButtonBehavior {
 						onMachineSelected(label, machine) {
 							if (machine)
@@ -190,8 +178,8 @@ export var ConsolePane = Container.template($ => ({
 						}
 					},
 				}),
-				Content($, {
-					skin:buttonsSkin, variant:5, active:true, visible:false, 
+				IconButton($, {
+					variant:5, active:true, visible:false, 
 					Behavior: class extends ButtonBehavior {
 						onTap(button) {
 							button.bubble("doClearConsole");

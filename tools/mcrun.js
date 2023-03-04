@@ -404,7 +404,7 @@ export default class extends Tool {
 		this.preloads = null;
 		this.recipes = null;
 		this.strip = null;
-		this.tsconfig = this.manifest.tsconfig;
+		this.typescript = this.manifest.typescript;
 
 		if (this.rotation === undefined)
 			this.rotation = this.config.rotation ?? 0;
@@ -460,10 +460,18 @@ export default class extends Tool {
 			file = new MakeFile(path);
 			file.generate(this);
 			if (this.make) {
-				if (this.windows)
-					this.then("nmake", "/nologo", "/f", path);
-				else
-					this.then("make", "-f", path);
+				if (this.buildTarget) {
+					if (this.windows)
+						this.then("nmake", "/nologo", "/f", path, this.buildTarget);
+					else 
+						this.then("make", "-f", path, this.buildTarget);
+				}
+				else {
+					if (this.windows)
+						this.then("nmake", "/nologo", "/f", path);
+					else
+						this.then("make", "-f", path);
+				}
 			}
 		}
 		else {

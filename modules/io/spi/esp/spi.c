@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Moddable Tech, Inc.
+ * Copyright (c) 2021-2023 Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  *
@@ -17,6 +17,12 @@
  *   along with the Moddable SDK Runtime.  If not, see <http://www.gnu.org/licenses/>.
  *
  */
+
+/*
+	to do:
+	
+		allow multiple instances on the same bus
+*/
 
 #include "xsmc.h"			// xs bindings for microcontroller
 #include "mc.xs.h"			// for xsID_* values
@@ -43,6 +49,7 @@ struct SPIRecord {
 	uint8_t		select;
 	uint8_t		active;
 	uint8_t		doUninit;
+	uint8_t		transform;
 };
 typedef struct SPIRecord SPIRecord;
 typedef struct SPIRecord *SPI;
@@ -52,11 +59,10 @@ typedef struct SPIRecord *SPI;
 static void doChipSelect(uint8_t active, modSPIConfiguration config);
 static void doChipSelectNOP(uint8_t active, modSPIConfiguration config);
 
-//@@ pin values for in, out, and clock not being used or verified
 void xs_spi_constructor(xsMachine *the)
 {
 	SPI spi;
-	uint8_t mosi = kInvalidPin, miso = kInvalidPin, clock, select = kInvalidPin, active = 1, mode = 0;
+	uint8_t mosi = kInvalidPin, miso = kInvalidPin, clock, select = kInvalidPin, active = 0, mode = 0;
 	int hz, tmp;
 #if ESP32
 	uint8_t spiPort;
@@ -69,37 +75,41 @@ void xs_spi_constructor(xsMachine *the)
 	xsmcGet(xsVar(0), xsArg(0), xsID_clock);
 	clock = builtinGetPin(the, &xsVar(0));
 	if (!builtinIsPinFree(clock))
-		xsRangeError("in use");
+		xsUnknownError("in use");
 
 	xsmcGet(xsVar(0), xsArg(0), xsID_hz);
 	hz = xsmcToInteger(xsVar(0));
+	if ((hz < 1) || (hz > 40000000))
+		xsRangeError("invalid hz");
 
 	if (xsmcHas(xsArg(0), xsID_out)) {
 		xsmcGet(xsVar(0), xsArg(0), xsID_out);
 		mosi = builtinGetPin(the, &xsVar(0));
 		if (!builtinIsPinFree(mosi))
-			xsRangeError("in use");
+			xsUnknownError("in use");
 	}
 
 	if (xsmcHas(xsArg(0), xsID_in)) {
 		xsmcGet(xsVar(0), xsArg(0), xsID_in);
 		miso = builtinGetPin(the, &xsVar(0));
 		if (!builtinIsPinFree(miso))
-			xsRangeError("in use");
+			xsUnknownError("in use");
 	}
 
 	if (xsmcHas(xsArg(0), xsID_select)) {
 		xsmcGet(xsVar(0), xsArg(0), xsID_select);
 		select = builtinGetPin(the, &xsVar(0));
 		if (!builtinIsPinFree(select))
-			xsRangeError("in use");
-	}
+			xsUnknownError("in use");
 
-	if (xsmcHas(xsArg(0), xsID_active)) {
-		xsmcGet(xsVar(0), xsArg(0), xsID_active);
-		active = xsmcToInteger(xsVar(0));
-		if ((0 != active) && (1 != active))
-			xsRangeError("invalid active");
+		if (xsmcHas(xsArg(0), xsID_active)) {
+			xsmcGet(xsVar(0), xsArg(0), xsID_active);
+			active = xsmcToInteger(xsVar(0));
+			if ((0 != active) && (1 != active))
+				xsRangeError("invalid active");
+		}
+		else
+			xsTrace("WARNING: SPI used with default active (0). Please confirm that is intended.\n");
 	}
 
 	if (xsmcHas(xsArg(0), xsID_mode)) {
@@ -111,16 +121,20 @@ void xs_spi_constructor(xsMachine *the)
 	}
 
 	if ((kInvalidPin == mosi) && (kInvalidPin == miso))
-		xsRangeError("mosi or miso required");
+		xsUnknownError("in or out required");
 
 #if ESP32
 	xsmcGet(xsVar(0), xsArg(0), xsID_port);
-	tmp = xsmcToInteger(xsVar(0));
+	tmp = builtinGetSignedInteger(the, &xsVar(0));
+#if kCPUESP32C3 || kCPUESP32S3
+	if ((SPI1_HOST != tmp) && (SPI2_HOST != tmp) && (SPI3_HOST != tmp))
+#else
 	if ((SPI_HOST != tmp) && (HSPI_HOST != tmp)
-#if ESP32 != 2
+#if !defined( kCPUESP32S2 )
 		 && (VSPI_HOST != tmp)
 #endif
 		)
+#endif
 		xsRangeError("invalid port");
 	spiPort = (uint8_t)tmp;
 #else
@@ -134,7 +148,7 @@ void xs_spi_constructor(xsMachine *the)
 
 	spi = c_calloc(1, sizeof(SPIRecord));
 	if (!spi)
-		xsRangeError("no memory");
+		xsUnknownError("no memory");
 
 	xsmcSetHostData(xsThis, spi);
 	spi->obj = xsThis;
@@ -216,7 +230,7 @@ void xs_spi_read(xsMachine *the)
 	}
 	else {
 		int requested = xsmcToInteger(xsArg(0));
-		if ((requested < 0) || (requested > 65535))
+		if ((requested <= 0) || (requested > 65535))
 			xsRangeError("unsupported byteLength");
 		count = requested;
 		data = xsmcSetArrayBuffer(xsResult, NULL, count);
@@ -235,7 +249,10 @@ void xs_spi_write(xsMachine *the)
 	if (count > 65535)
 		xsRangeError("unsupported byteLength");
 
-	modSPITx(&spi->config, (uint8_t *)data, (uint16_t)count);
+	if (spi->transform)
+		modSPITxSwap16(&spi->config, (uint8_t *)data, (uint16_t)count);
+	else
+		modSPITx(&spi->config, (uint8_t *)data, (uint16_t)count);
 }
 
 void xs_spi_transfer(xsMachine *the)
@@ -259,6 +276,13 @@ void xs_spi_flush(xsMachine *the)
 
 	if (xsmcArgc && xsmcTest(xsArg(0)))
 		modSPIActivateConfiguration(NULL);
+}
+
+void xs_spi_set_transform(xsMachine *the)
+{
+	SPI spi = xsmcGetHostDataValidate(xsThis, xs_spi_destructor);
+
+	spi->transform = xsmcTest(xsArg(0));
 }
 
 void doChipSelect(uint8_t active, modSPIConfiguration config)

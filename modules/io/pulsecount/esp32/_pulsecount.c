@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2021 Moddable Tech, Inc.
+ * Copyright (c) 2016-2023 Moddable Tech, Inc.
  *
  *   This file is part of the Moddable SDK Runtime.
  * 
@@ -22,9 +22,11 @@
 #include "mc.xs.h"			// for xsID_ values
 #include "xsHost.h"         // platform support
 
+#if defined(SOC_PCNT_SUPPORTED)
 #include "builtinCommon.h"
 
 #include "driver/pcnt.h"
+#include "soc/pcnt_struct.h"
 
 struct PulseCountRecord {
 	int			unit;
@@ -42,7 +44,7 @@ struct PulseCountRecord {
 typedef struct PulseCountRecord PulseCountRecord;
 typedef struct PulseCountRecord *PulseCount;
 
-#define PCNT_AVAILABLE ((1 << SOC_PCNT_UNIT_NUM) - 1)
+#define PCNT_AVAILABLE (SOC_PCNT_GROUPS * SOC_PCNT_UNITS_PER_GROUP)
 
 static uint8_t gPulseCountUnitsAvailable = PCNT_AVAILABLE;
 
@@ -190,7 +192,8 @@ void xs_pulsecount_constructor_(xsMachine *the)
 
 	if (onReadable) {
 		xsSlot tmp;
-        
+
+		pc->triggered = 0;
 		pc->the = the;
 		pc->onReadable = onReadable;
 
@@ -291,3 +294,12 @@ void pulsecountDeliver(void *the, void *refcon, uint8_t *message, uint16_t messa
 		xsCallFunction0(xsReference(pc->onReadable), pc->obj);
 	xsEndHost(pc->the);
 }
+
+#else 		//  ! SOC_PCNT_SUPPORTED
+void xs_pulsecount_destructor_(void *data) {}
+void xs_pulsecount_constructor_(xsMachine *the) {}
+void xs_pulsecount_mark_(xsMachine* the, void *it, xsMarkRoot markRoot) {}
+void xs_pulsecount_close_(xsMachine *the) {}
+void xs_pulsecount_read_(xsMachine *the) {}
+void xs_pulsecount_write_(xsMachine *the) {}
+#endif

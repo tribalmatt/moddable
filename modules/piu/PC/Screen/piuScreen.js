@@ -30,12 +30,15 @@ export const Screen = Template(Object.freeze({
 	get hole() @ "PiuScreen_get_hole",
 	get pixelFormat() @ "PiuScreen_get_pixelFormat",
 	get running() @ "PiuScreen_get_running",
+	get transparency() @ "PiuScreen_get_transparency",
 	
 	set hole(it) @ "PiuScreen_set_hole",
+	set transparency(it) @ "PiuScreen_set_transparency",
 	
 	launch(path) @ "PiuScreen_launch",
 	postMessage(json) @ "PiuScreen_postMessage",
 	quit() @ "PiuScreen_quit",
+	writePNG(path) @ "PiuScreen_writePNG",
 }));
 
 export class ScreenWorker @ "PiuScreenWorkerDelete" {
