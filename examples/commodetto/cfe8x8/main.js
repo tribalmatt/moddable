@@ -56,3 +56,20 @@ Timer.repeat(() => {
 	render.end();
 	color += 1;
 }, 1000 / 12);
+
+// MV // clears the background for the heltec board
+/*
+	// for (let i = 0, y = 0; i < text.length; i++, y += 9) {
+	for (let i = 0, y = 0; i >= 0; i++, y += 9) {
+		render.begin(0, y, render.width, 8);
+			render.fillRectangle(black, 0, 0, render.width, render.height);
+			// Passing in a 5th argument is used as the width and the code truncates and uses elipses
+			// render.drawText(text[i], font, colors[color % colors.length], 0, y, render.width);
+			// why the 5 arguments...
+			
+			// render.drawText("Counting ... " + i, font, render.makeColor(255, 255, 255), 0, y, render.width);
+			render.drawText("Clean..." + i, font, color, 0, 9);
+		render.end();
+	}
+// 	color += 1;
+*/
